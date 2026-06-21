@@ -4,6 +4,8 @@ description = "Workspace automation for Rustodian"
 edition = "2024"
 version = "0.1.0"
 publish = false
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/drawmeanelephant/rustodian"
 
 # xtask intentionally does not use workspace inheritance
 # to keep it self-contained
