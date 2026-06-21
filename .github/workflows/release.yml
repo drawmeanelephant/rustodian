@@ -30,7 +30,7 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }} -p rustodian-cli
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rustodian-${{ matrix.target }}
           path: |
