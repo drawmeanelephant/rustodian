@@ -36,7 +36,9 @@ pub struct StatusReport {
 /// This is the primary API surface for any frontend (CLI, GUI, etc.).
 pub struct Custodian {
     store: Box<dyn ProjectStore>,
+    #[allow(dead_code)]
     scanner: Box<dyn ProjectScanner>,
+    #[allow(dead_code)]
     git: Box<dyn GitInspector>,
 }
 

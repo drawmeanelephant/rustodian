@@ -2,7 +2,7 @@
 # Scope: "all" = entire dep graph, "workspace" = direct deps only
 vulnerability = "all"
 unmaintained = "workspace"
-yanked = "all"
+yanked = "deny"
 notice = "workspace"
 ignore = []
 

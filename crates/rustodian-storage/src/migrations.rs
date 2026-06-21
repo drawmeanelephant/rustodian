@@ -6,7 +6,7 @@ use tracing::info;
 use crate::error::StorageError;
 
 /// The initial database schema.
-const MIGRATION_001: &str = r#"
+const MIGRATION_001: &str = r"
 CREATE TABLE IF NOT EXISTS projects (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS scans (
 
 CREATE INDEX IF NOT EXISTS idx_projects_path ON projects(path);
 CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
-"#;
+";
 
 /// Run all pending migrations.
 pub fn run_migrations(conn: &Connection) -> Result<(), StorageError> {

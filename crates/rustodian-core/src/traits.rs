@@ -19,7 +19,7 @@ pub struct DiscoveredProject {
 
 /// Contract for project persistence.
 ///
-/// Implementors provide the actual storage mechanism (e.g., SQLite).
+/// Implementors provide the actual storage mechanism (e.g., `SQLite`).
 pub trait ProjectStore: Send + Sync {
     /// Persist a project, returning its ID.
     fn save_project(&self, project: &Project) -> Result<ProjectId, CoreError>;

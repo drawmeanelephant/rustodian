@@ -97,8 +97,8 @@ fn main() -> Result<()> {
     let store = SqliteStore::open(&db_path).context("failed to open database")?;
     store.migrate().context("failed to run migrations")?;
 
-    let scanner = FsScanner::default();
-    let git = Git2Inspector::default();
+    let scanner = FsScanner;
+    let git = Git2Inspector;
 
     let custodian = Custodian::new(Box::new(store), Box::new(scanner), Box::new(git));
 

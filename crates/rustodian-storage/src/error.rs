@@ -2,10 +2,10 @@
 
 use rustodian_core::CoreError;
 
-/// Errors specific to the SQLite storage implementation.
+/// Errors specific to the `SQLite` storage implementation.
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
-    /// SQLite error.
+    /// `SQLite` error.
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 

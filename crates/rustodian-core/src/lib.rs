@@ -3,7 +3,7 @@
 //! Domain logic, trait definitions, and orchestration for Rustodian.
 //!
 //! This crate defines the contracts that infrastructure crates must implement.
-//! It has **zero knowledge** of SQLite, filesystems, or git — those are
+//! It has **zero knowledge** of `SQLite`, filesystems, or git — those are
 //! implementation details provided by other crates.
 //!
 //! ## Architecture

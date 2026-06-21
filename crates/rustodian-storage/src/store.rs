@@ -1,4 +1,4 @@
-//! SQLite implementation of [`ProjectStore`].
+//! `SQLite` implementation of [`ProjectStore`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -13,7 +13,7 @@ use rustodian_types::{Project, ProjectId, ScanId, ScanRecord};
 use crate::error::StorageError;
 use crate::migrations;
 
-/// SQLite-backed project store.
+/// `SQLite`-backed project store.
 ///
 /// Wraps `Connection` in a `Mutex` to satisfy `Send + Sync` on `ProjectStore`.
 /// For a single-threaded CLI tool this adds no overhead — there's no contention.
