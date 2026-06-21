@@ -1,13 +1,10 @@
 [advisories]
 # Scope: "all" = entire dep graph, "workspace" = direct deps only
-vulnerability = "all"
 unmaintained = "workspace"
 yanked = "deny"
-notice = "workspace"
 ignore = []
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
