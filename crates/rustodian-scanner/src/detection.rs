@@ -77,9 +77,7 @@ fn detect_python(path: &Path) -> Option<LanguageDetection> {
         }
     }
     if path.join("requirements.txt").exists() {
-        markers.push(LanguageMarker::ConfigFile(
-            "requirements.txt".to_string(),
-        ));
+        markers.push(LanguageMarker::ConfigFile("requirements.txt".to_string()));
     }
 
     if markers.is_empty() {
@@ -107,9 +105,7 @@ fn detect_node(path: &Path) -> Option<LanguageDetection> {
     let mut markers = Vec::new();
 
     if path.join("package.json").exists() {
-        markers.push(LanguageMarker::ManifestFile(
-            "package.json".to_string(),
-        ));
+        markers.push(LanguageMarker::ManifestFile("package.json".to_string()));
     }
     for lock in &[
         "package-lock.json",

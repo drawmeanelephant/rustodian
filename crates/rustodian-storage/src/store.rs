@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tracing::debug;
 
-use rustodian_core::traits::ProjectStore;
 use rustodian_core::CoreError;
+use rustodian_core::traits::ProjectStore;
 use rustodian_types::{Project, ProjectId, ScanId, ScanRecord};
 
 use crate::error::StorageError;
@@ -133,6 +133,8 @@ mod tests {
     fn test_migrations_idempotent() {
         let store = SqliteStore::open_in_memory().expect("should open");
         store.migrate().expect("first migration");
-        store.migrate().expect("second migration should be idempotent");
+        store
+            .migrate()
+            .expect("second migration should be idempotent");
     }
 }

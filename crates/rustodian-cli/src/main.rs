@@ -111,8 +111,6 @@ fn main() -> Result<()> {
             commands::list::execute(&custodian, language.as_deref(), &cli.format)
         }
         Commands::Status => commands::status::execute(&custodian, &cli.format),
-        Commands::Info { project } => {
-            commands::info::execute(&custodian, &project, &cli.format)
-        }
+        Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
     }
 }

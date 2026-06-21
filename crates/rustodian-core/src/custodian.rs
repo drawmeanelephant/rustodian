@@ -8,9 +8,7 @@ use std::path::Path;
 
 use tracing::{info, instrument};
 
-use rustodian_types::{
-    Project, ProjectId, ScanConfig, ScanId, ScanRecord,
-};
+use rustodian_types::{Project, ProjectId, ScanConfig, ScanId, ScanRecord};
 
 use crate::error::CoreError;
 use crate::traits::{GitInspector, ProjectScanner, ProjectStore};
@@ -49,7 +47,11 @@ impl Custodian {
         scanner: Box<dyn ProjectScanner>,
         git: Box<dyn GitInspector>,
     ) -> Self {
-        Self { store, scanner, git }
+        Self {
+            store,
+            scanner,
+            git,
+        }
     }
 
     /// Scan a directory tree for projects and store the results.

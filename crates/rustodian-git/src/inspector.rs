@@ -4,8 +4,8 @@ use std::path::Path;
 
 use tracing::{debug, instrument};
 
-use rustodian_core::traits::GitInspector;
 use rustodian_core::CoreError;
+use rustodian_core::traits::GitInspector;
 use rustodian_types::VcsInfo;
 
 /// Git inspector using libgit2.

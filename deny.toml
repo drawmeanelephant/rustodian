@@ -1,8 +1,10 @@
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "deny"
-notice = "warn"
+# Scope: "all" = entire dep graph, "workspace" = direct deps only
+vulnerability = "all"
+unmaintained = "workspace"
+yanked = "all"
+notice = "workspace"
+ignore = []
 
 [licenses]
 unlicensed = "deny"

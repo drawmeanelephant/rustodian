@@ -5,9 +5,7 @@
 
 use std::path::Path;
 
-use rustodian_types::{
-    Project, ProjectId, ScanConfig, ScanId, ScanRecord, VcsInfo,
-};
+use rustodian_types::{Project, ProjectId, ScanConfig, ScanId, ScanRecord, VcsInfo};
 
 use crate::error::CoreError;
 
@@ -50,11 +48,7 @@ pub trait ProjectStore: Send + Sync {
 /// Implementors walk the filesystem to find software projects.
 pub trait ProjectScanner: Send + Sync {
     /// Scan a directory tree for software projects.
-    fn scan(
-        &self,
-        root: &Path,
-        config: &ScanConfig,
-    ) -> Result<Vec<DiscoveredProject>, CoreError>;
+    fn scan(&self, root: &Path, config: &ScanConfig) -> Result<Vec<DiscoveredProject>, CoreError>;
 }
 
 /// Contract for VCS inspection.
