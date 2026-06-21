@@ -1,0 +1,33 @@
+[package]
+name = "rustodian-cli"
+description = "Command-line interface for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rustodian"
+path = "src/main.rs"
+
+[dependencies]
+rustodian-types.workspace = true
+rustodian-core.workspace = true
+rustodian-storage.workspace = true
+rustodian-scanner.workspace = true
+rustodian-git.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+comfy-table.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

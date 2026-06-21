@@ -1,0 +1,24 @@
+[package]
+name = "rustodian-storage"
+description = "SQLite storage backend for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustodian-types.workspace = true
+rustodian-core.workspace = true
+rusqlite.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

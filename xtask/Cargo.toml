@@ -1,0 +1,9 @@
+[package]
+name = "xtask"
+description = "Workspace automation for Rustodian"
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+# xtask intentionally does not use workspace inheritance
+# to keep it self-contained

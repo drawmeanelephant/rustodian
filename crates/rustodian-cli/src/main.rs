@@ -1,0 +1,118 @@
+//! # Rustodian CLI
+//!
+//! Department of Project Custodianship 🏛️
+//!
+//! Command-line entry point for the Rustodian project observatory.
+//! This is the composition root — it wires infrastructure implementations
+//! to the core orchestrator and dispatches CLI commands.
+
+mod commands;
+mod output;
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use tracing::info;
+
+use rustodian_core::Custodian;
+use rustodian_git::Git2Inspector;
+use rustodian_scanner::FsScanner;
+use rustodian_storage::SqliteStore;
+
+/// Rustodian: Department of Project Custodianship 🏛️
+///
+/// A personal project observatory that discovers, indexes,
+/// and monitors your software projects.
+#[derive(Parser)]
+#[command(name = "rustodian", version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    /// Output format
+    #[arg(long, global = true, default_value = "table")]
+    format: OutputFormat,
+
+    /// Verbosity level (-v, -vv, -vvv)
+    #[arg(short, long, global = true, action = ArgAction::Count)]
+    verbose: u8,
+
+    /// Path to database file
+    #[arg(long, global = true, env = "RUSTODIAN_DB")]
+    db: Option<PathBuf>,
+}
+
+/// Available output formats.
+#[derive(Debug, Clone, ValueEnum)]
+enum OutputFormat {
+    Table,
+    Json,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Scan a directory tree for software projects
+    Scan {
+        /// Root directory to scan
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Maximum directory depth
+        #[arg(long, default_value = "5")]
+        max_depth: usize,
+    },
+
+    /// List all tracked projects
+    List {
+        /// Filter by language
+        #[arg(long)]
+        language: Option<String>,
+    },
+
+    /// Show observatory status summary
+    Status,
+
+    /// Show detailed info about a specific project
+    Info {
+        /// Project name or ID
+        project: String,
+    },
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Initialize tracing based on verbosity
+    output::init_tracing(cli.verbose);
+
+    info!("Rustodian starting");
+
+    // Wire up infrastructure
+    let db_path = match cli.db {
+        Some(path) => path,
+        None => SqliteStore::default_path().context("failed to determine database path")?,
+    };
+
+    let store = SqliteStore::open(&db_path).context("failed to open database")?;
+    store.migrate().context("failed to run migrations")?;
+
+    let scanner = FsScanner::default();
+    let git = Git2Inspector::default();
+
+    let custodian = Custodian::new(Box::new(store), Box::new(scanner), Box::new(git));
+
+    // Dispatch command
+    match cli.command {
+        Commands::Scan { path, max_depth } => {
+            commands::scan::execute(&custodian, &path, max_depth, &cli.format)
+        }
+        Commands::List { language } => {
+            commands::list::execute(&custodian, language.as_deref(), &cli.format)
+        }
+        Commands::Status => commands::status::execute(&custodian, &cli.format),
+        Commands::Info { project } => {
+            commands::info::execute(&custodian, &project, &cli.format)
+        }
+    }
+}

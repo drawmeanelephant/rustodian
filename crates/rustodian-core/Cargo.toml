@@ -1,0 +1,19 @@
+[package]
+name = "rustodian-core"
+description = "Domain logic, traits, and orchestration for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustodian-types.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
