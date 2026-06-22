@@ -1,0 +1,24 @@
+[package]
+name = "rustodian-desktop"
+description = "Desktop graphical interface for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rustodian-desktop"
+path = "src/main.rs"
+
+[dependencies]
+rustodian-types.workspace = true
+rustodian-core.workspace = true
+rustodian-storage.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eframe = "0.30.0"
+
+[lints]
+workspace = true
