@@ -2,11 +2,12 @@
 
 use std::path::Path;
 
+use git2::{Repository, StatusOptions};
 use tracing::{debug, instrument};
 
 use rustodian_core::CoreError;
 use rustodian_core::traits::GitInspector;
-use rustodian_types::VcsInfo;
+use rustodian_types::{CommitInfo, VcsInfo, VcsType};
 
 /// Git inspector using libgit2.
 #[derive(Debug, Default)]
@@ -16,12 +17,90 @@ impl GitInspector for Git2Inspector {
     #[instrument(skip(self), fields(path = %project_path.display()))]
     fn inspect(&self, project_path: &Path) -> Result<Option<VcsInfo>, CoreError> {
         debug!("Inspecting git repository");
-        let _ = project_path;
-        todo!("Open repo with git2, extract branch/remote/dirty/last commit")
+
+        let Ok(repo) = Repository::open(project_path) else {
+            return Ok(None);
+        };
+
+        let branch = match repo.head() {
+            Ok(head) => {
+                if head.is_branch() {
+                    head.shorthand().ok().map(std::string::ToString::to_string)
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        };
+
+        let remote_url = repo
+            .find_remote("origin")
+            .ok()
+            .and_then(|r| r.url().ok().map(std::string::ToString::to_string));
+
+        let mut status_opts = StatusOptions::new();
+        status_opts.include_untracked(true);
+        let is_dirty = match repo.statuses(Some(&mut status_opts)) {
+            Ok(statuses) => !statuses.is_empty(),
+            Err(_) => false,
+        };
+
+        let last_commit = match repo.head().and_then(|head| head.peel_to_commit()) {
+            Ok(commit) => {
+                let author = commit.author();
+                let time = chrono::DateTime::from_timestamp(commit.time().seconds(), 0)
+                    .unwrap_or_default();
+
+                Some(CommitInfo {
+                    sha: commit.id().to_string(),
+                    message: commit
+                        .summary()
+                        .unwrap_or(Some(""))
+                        .unwrap_or("")
+                        .to_string(),
+                    author: author.name().unwrap_or("").to_string(),
+                    timestamp: time,
+                })
+            }
+            Err(_) => None,
+        };
+
+        Ok(Some(VcsInfo {
+            vcs_type: VcsType::Git,
+            branch,
+            remote_url,
+            is_dirty,
+            last_commit,
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // Future: tests with tempdir git repos
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_inspect_not_a_repo() {
+        let dir = TempDir::new().unwrap();
+        let inspector = Git2Inspector;
+        let result = inspector.inspect(dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_inspect_repo() {
+        let dir = TempDir::new().unwrap();
+
+        let _repo = Repository::init(dir.path()).unwrap();
+
+        let inspector = Git2Inspector;
+        let result = inspector.inspect(dir.path()).unwrap();
+
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert_eq!(info.vcs_type, VcsType::Git);
+        assert!(!info.is_dirty);
+        assert!(info.branch.is_none());
+    }
 }
