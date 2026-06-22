@@ -37,7 +37,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Database
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Git
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
