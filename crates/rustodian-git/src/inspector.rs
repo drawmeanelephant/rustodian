@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn test_inspect_not_a_repo() {
         let dir = TempDir::new().unwrap();
-        let inspector = Git2Inspector::default();
+        let inspector = Git2Inspector;
         let result = inspector.inspect(dir.path()).unwrap();
         assert!(result.is_none());
     }
@@ -94,7 +94,7 @@ mod tests {
 
         let _repo = Repository::init(dir.path()).unwrap();
 
-        let inspector = Git2Inspector::default();
+        let inspector = Git2Inspector;
         let result = inspector.inspect(dir.path()).unwrap();
 
         assert!(result.is_some());
