@@ -1,9 +1,9 @@
+use anyhow::{Context, Result};
 use eframe::egui;
 use rustodian_core::traits::ProjectStore;
 use rustodian_storage::SqliteStore;
 use rustodian_types::Project;
 use std::sync::Arc;
-use anyhow::{Context, Result};
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -23,7 +23,10 @@ fn main() -> eframe::Result {
                 }
             };
 
-            let mut app = RustodianApp { store, ..Default::default() };
+            let mut app = RustodianApp {
+                store,
+                ..Default::default()
+            };
             app.load_projects();
             Ok(Box::new(app))
         }),
@@ -91,7 +94,8 @@ impl eframe::App for RustodianApp {
                 } else {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for proj in &self.projects {
-                            let is_selected = self.selected_project.as_ref().map(|p| &p.id) == Some(&proj.id);
+                            let is_selected =
+                                self.selected_project.as_ref().map(|p| &p.id) == Some(&proj.id);
                             if ui.selectable_label(is_selected, &proj.name).clicked() {
                                 self.selected_project = Some(proj.clone());
                             }
@@ -105,8 +109,16 @@ impl eframe::App for RustodianApp {
                 ui.horizontal(|ui| {
                     ui.heading(&project.name);
 
-                    let langs: Vec<String> = project.languages.iter().map(|l| l.language.to_string()).collect();
-                    let lang_str = if langs.is_empty() { "unknown".to_string() } else { langs.join(", ") };
+                    let langs: Vec<String> = project
+                        .languages
+                        .iter()
+                        .map(|l| l.language.to_string())
+                        .collect();
+                    let lang_str = if langs.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        langs.join(", ")
+                    };
 
                     ui.label(format!("{lang_str} · local"));
                 });
@@ -126,9 +138,17 @@ impl eframe::App for RustodianApp {
                         ui.label(format!("Path: {}", project.path.display()));
 
                         if let Some(vcs) = &project.vcs {
-                            ui.label(format!("VCS: {} (branch: {})", vcs.vcs_type, vcs.branch.as_deref().unwrap_or("none")));
+                            ui.label(format!(
+                                "VCS: {} (branch: {})",
+                                vcs.vcs_type,
+                                vcs.branch.as_deref().unwrap_or("none")
+                            ));
                             if let Some(commit) = &vcs.last_commit {
-                                let sha = if commit.sha.len() >= 7 { &commit.sha[0..7] } else { &commit.sha };
+                                let sha = if commit.sha.len() >= 7 {
+                                    &commit.sha[0..7]
+                                } else {
+                                    &commit.sha
+                                };
                                 ui.label(format!("Latest Commit: {} - {}", sha, commit.message));
                             }
                         }
