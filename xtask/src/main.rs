@@ -7,6 +7,8 @@
 
 use std::process::Command;
 
+mod export_rag;
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -14,6 +16,7 @@ fn main() {
         Some("coverage") => coverage(),
         Some("lint") => lint(),
         Some("dist") => dist(),
+        Some("export-rag") => export_rag::export_rag(),
         Some("help") | None => help(),
         Some(unknown) => {
             eprintln!("Unknown command: {unknown}");
@@ -33,6 +36,7 @@ fn help() {
     println!("  coverage    Run tests with coverage reporting");
     println!("  lint        Run all lints (fmt + clippy + doc)");
     println!("  dist        Build release binaries");
+    println!("  export-rag  Export codebase to RAG-friendly markdown files");
     println!("  help        Show this help");
 }
 
