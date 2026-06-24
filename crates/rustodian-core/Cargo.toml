@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+async-trait = "0.1"
 rustodian-types.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

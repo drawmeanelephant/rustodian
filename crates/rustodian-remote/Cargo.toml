@@ -1,0 +1,17 @@
+[package]
+name = "rustodian-remote"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustodian-types = { workspace = true }
+rustodian-core = { workspace = true }
+tokio = { version = "1.52", features = ["full"] }
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+flate2 = "1.0"
+tar = "0.4"
+globset = "0.4"
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = "0.1"

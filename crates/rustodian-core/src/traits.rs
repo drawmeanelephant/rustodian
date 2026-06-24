@@ -59,3 +59,20 @@ pub trait GitInspector: Send + Sync {
     /// Returns `None` if the directory is not a git repository.
     fn inspect(&self, project_path: &Path) -> Result<Option<VcsInfo>, CoreError>;
 }
+use rustodian_types::RemoteProject;
+
+#[async_trait::async_trait]
+pub trait RemoteDownloader: Send + Sync {
+    async fn download_and_extract(
+        &self,
+        project: &RemoteProject,
+        dest_dir: &std::path::Path,
+        preserve_patterns: &[String],
+    ) -> Result<(), crate::error::CoreError>;
+}
+
+pub trait RemoteProjectStore: Send + Sync {
+    fn save_remote_project(&self, project: &RemoteProject) -> Result<(), crate::error::CoreError>;
+    fn list_remote_projects(&self) -> Result<Vec<RemoteProject>, crate::error::CoreError>;
+    fn delete_remote_project(&self, repo_slug: &str) -> Result<bool, crate::error::CoreError>;
+}

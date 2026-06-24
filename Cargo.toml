@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/rustodian-desktop","crates/*", "xtask"]
+    "crates/rustodian-desktop","crates/*", "crates/rustodian-remote", "xtask"]
 resolver = "3"
 
 [workspace.package]

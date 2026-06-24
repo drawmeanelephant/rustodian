@@ -10,3 +10,4 @@ pub mod migrations;
 pub mod store;
 
 pub use store::SqliteStore;
+pub mod remote_store;

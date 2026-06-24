@@ -70,6 +70,30 @@ pub fn run_migrations(conn: &Connection) -> Result<(), StorageError> {
         .map_err(StorageError::Sqlite)?;
     }
 
+    let applied_002: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM _migrations WHERE id = 2",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::Sqlite)?;
+    if !applied_002 {
+        info!("Applying migration 002: remote projects");
+        conn.execute_batch(MIGRATION_002)
+            .map_err(StorageError::Sqlite)?;
+        conn.execute(
+            "INSERT INTO _migrations (id, name) VALUES (2, 'remote_projects')",
+            [],
+        )
+        .map_err(StorageError::Sqlite)?;
+    }
+
     info!("Migrations complete");
     Ok(())
 }
+const MIGRATION_002: &str = r"
+CREATE TABLE IF NOT EXISTS remote_projects (
+    repo_slug         TEXT PRIMARY KEY,
+    preserve_patterns TEXT NOT NULL DEFAULT '[]'
+);
+";

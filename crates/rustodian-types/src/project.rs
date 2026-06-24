@@ -58,3 +58,8 @@ pub struct ProjectMetadata {
     #[serde(flatten)]
     pub extra: serde_json::Value,
 }
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RemoteProject {
+    pub repo_slug: String,
+    pub preserve_patterns: Vec<String>,
+}
