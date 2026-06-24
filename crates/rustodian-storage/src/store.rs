@@ -17,8 +17,9 @@ use crate::migrations;
 ///
 /// Wraps `Connection` in a `Mutex` to satisfy `Send + Sync` on `ProjectStore`.
 /// For a single-threaded CLI tool this adds no overhead — there's no contention.
+#[derive(Clone)]
 pub struct SqliteStore {
-    conn: Mutex<Connection>,
+    pub(crate) conn: std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
 }
 
 impl SqliteStore {
@@ -35,7 +36,7 @@ impl SqliteStore {
             .map_err(StorageError::Sqlite)?;
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: std::sync::Arc::new(Mutex::new(conn)),
         })
     }
 
@@ -46,7 +47,7 @@ impl SqliteStore {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(StorageError::Sqlite)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: std::sync::Arc::new(Mutex::new(conn)),
         })
     }
 

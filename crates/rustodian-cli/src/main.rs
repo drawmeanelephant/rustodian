@@ -73,10 +73,39 @@ enum Commands {
     /// Show observatory status summary
     Status,
 
+    /// Manage remote GitHub projects
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommands,
+    },
+
     /// Show detailed info about a specific project
     Info {
         /// Project name or ID
         project: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// Add a remote project to track
+    Add {
+        /// GitHub repository slug (e.g., username/repo)
+        repo_slug: String,
+
+        /// Glob patterns of files to preserve during refresh
+        #[arg(long, value_delimiter = ',')]
+        preserve: Vec<String>,
+    },
+
+    /// List tracked remote projects
+    List,
+
+    /// Refresh (download) all tracked remote projects
+    Refresh {
+        /// Destination directory
+        #[arg(long, default_value = ".")]
+        dest: PathBuf,
     },
 }
 
@@ -100,7 +129,7 @@ fn main() -> Result<()> {
     let scanner = FsScanner;
     let git = Git2Inspector;
 
-    let custodian = Custodian::new(Box::new(store), Box::new(scanner), Box::new(git));
+    let custodian = Custodian::new(Box::new(store.clone()), Box::new(scanner), Box::new(git));
 
     // Dispatch command
     match cli.command {
@@ -111,6 +140,14 @@ fn main() -> Result<()> {
             commands::list::execute(&custodian, language.as_deref(), &cli.format)
         }
         Commands::Status => commands::status::execute(&custodian, &cli.format),
+        Commands::Remote { command } => match command {
+            RemoteCommands::Add {
+                repo_slug,
+                preserve,
+            } => commands::remote::execute_add(&store, &repo_slug, &preserve),
+            RemoteCommands::List => commands::remote::execute_list(&store, &cli.format),
+            RemoteCommands::Refresh { dest } => commands::remote::execute_refresh(&store, &dest),
+        },
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
     }
 }
