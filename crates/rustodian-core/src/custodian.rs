@@ -61,19 +61,19 @@ impl Custodian {
     pub fn scan(&self, root: &Path, config: &ScanConfig) -> Result<ScanReport, CoreError> {
         info!("Starting scan");
         let start_time = chrono::Utc::now();
-        
+
         let discovered = self.scanner.scan(root, config)?;
-        
+
         let mut projects_new = 0;
         let mut projects_updated = 0;
-        
+
         for d in &discovered {
             let vcs = self.git.inspect(&d.path)?;
             let now = chrono::Utc::now();
-            
+
             let project = if let Some(mut existing) = self.store.find_by_path(&d.path)? {
-                existing.name = d.name.clone();
-                existing.languages = d.languages.clone();
+                existing.name.clone_from(&d.name);
+                existing.languages.clone_from(&d.languages);
                 existing.vcs = vcs;
                 existing.last_scanned_at = Some(now);
                 projects_updated += 1;
@@ -91,10 +91,10 @@ impl Custodian {
                     metadata: rustodian_types::ProjectMetadata::default(),
                 }
             };
-            
+
             self.store.save_project(&project)?;
         }
-        
+
         let scan_record = ScanRecord {
             id: ScanId::new(),
             root_path: root.to_path_buf(),
@@ -103,9 +103,9 @@ impl Custodian {
             projects_found: discovered.len(),
             status: rustodian_types::ScanStatus::Completed,
         };
-        
+
         let scan_id = self.store.save_scan(&scan_record)?;
-        
+
         Ok(ScanReport {
             scan_id,
             projects_found: discovered.len(),

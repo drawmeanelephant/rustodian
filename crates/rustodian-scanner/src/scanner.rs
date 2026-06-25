@@ -24,11 +24,11 @@ impl ProjectScanner for FsScanner {
         let mut builder = ignore::WalkBuilder::new(root);
         builder.max_depth(Some(config.max_depth));
         builder.follow_links(config.follow_symlinks);
-        
+
         // Exclude directories that shouldn't be searched (e.g. .git is already ignored by default)
-        
+
         let walker = builder.build();
-        
+
         for result in walker {
             let entry = match result {
                 Ok(e) => e,
@@ -37,12 +37,12 @@ impl ProjectScanner for FsScanner {
                     continue;
                 }
             };
-            
+
             let path = entry.path();
             if !path.is_dir() {
                 continue;
             }
-            
+
             let languages = crate::detection::detect_languages(path);
             if !languages.is_empty() {
                 let name = path
@@ -50,7 +50,7 @@ impl ProjectScanner for FsScanner {
                     .unwrap_or_else(|| std::ffi::OsStr::new("unknown"))
                     .to_string_lossy()
                     .to_string();
-                    
+
                 projects.push(DiscoveredProject {
                     name,
                     path: path.to_path_buf(),
@@ -58,7 +58,7 @@ impl ProjectScanner for FsScanner {
                 });
             }
         }
-        
+
         Ok(projects)
     }
 }

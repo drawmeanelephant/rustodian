@@ -12,9 +12,9 @@ pub fn execute(custodian: &Custodian, language: Option<&str>, format: &OutputFor
     if let Some(lang) = language {
         let lang = lang.to_lowercase();
         projects.retain(|p| {
-            p.languages.iter().any(|l| {
-                format!("{:?}", l.language).to_lowercase() == lang
-            })
+            p.languages
+                .iter()
+                .any(|l| format!("{:?}", l.language).to_lowercase() == lang)
         });
     }
 
@@ -34,9 +34,13 @@ pub fn execute(custodian: &Custodian, language: Option<&str>, format: &OutputFor
                     .iter()
                     .map(|l| format!("{:?}", l.language))
                     .collect();
-                
+
                 let vcs = if let Some(vcs) = p.vcs {
-                    format!("{:?} ({})", vcs.vcs_type, vcs.branch.unwrap_or_else(|| "detached".to_string()))
+                    format!(
+                        "{:?} ({})",
+                        vcs.vcs_type,
+                        vcs.branch.unwrap_or_else(|| "detached".to_string())
+                    )
                 } else {
                     "None".to_string()
                 };
