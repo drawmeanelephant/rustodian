@@ -60,8 +60,58 @@ impl Custodian {
     #[instrument(skip(self), fields(root = %root.display()))]
     pub fn scan(&self, root: &Path, config: &ScanConfig) -> Result<ScanReport, CoreError> {
         info!("Starting scan");
-        let _ = (root, config);
-        todo!("Scan orchestration: discover projects, inspect git, store results")
+        let start_time = chrono::Utc::now();
+        
+        let discovered = self.scanner.scan(root, config)?;
+        
+        let mut projects_new = 0;
+        let mut projects_updated = 0;
+        
+        for d in &discovered {
+            let vcs = self.git.inspect(&d.path)?;
+            let now = chrono::Utc::now();
+            
+            let project = if let Some(mut existing) = self.store.find_by_path(&d.path)? {
+                existing.name = d.name.clone();
+                existing.languages = d.languages.clone();
+                existing.vcs = vcs;
+                existing.last_scanned_at = Some(now);
+                projects_updated += 1;
+                existing
+            } else {
+                projects_new += 1;
+                Project {
+                    id: rustodian_types::ProjectId::new(),
+                    name: d.name.clone(),
+                    path: d.path.clone(),
+                    languages: d.languages.clone(),
+                    vcs,
+                    discovered_at: now,
+                    last_scanned_at: Some(now),
+                    metadata: rustodian_types::ProjectMetadata::default(),
+                }
+            };
+            
+            self.store.save_project(&project)?;
+        }
+        
+        let scan_record = ScanRecord {
+            id: ScanId::new(),
+            root_path: root.to_path_buf(),
+            started_at: start_time,
+            completed_at: Some(chrono::Utc::now()),
+            projects_found: discovered.len(),
+            status: rustodian_types::ScanStatus::Completed,
+        };
+        
+        let scan_id = self.store.save_scan(&scan_record)?;
+        
+        Ok(ScanReport {
+            scan_id,
+            projects_found: discovered.len(),
+            projects_new,
+            projects_updated,
+        })
     }
 
     /// List all tracked projects.

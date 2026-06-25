@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 async-trait = "0.1"
+chrono.workspace = true
 rustodian-types.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
