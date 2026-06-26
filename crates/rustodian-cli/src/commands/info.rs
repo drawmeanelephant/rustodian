@@ -1,6 +1,6 @@
 //! The `info` command.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use comfy_table::Table;
 
 use rustodian_core::Custodian;
@@ -38,7 +38,7 @@ pub fn execute(custodian: &Custodian, project_query: &str, format: &OutputFormat
                 }
             }
             println!("Discovered: {}", project.discovered_at.to_rfc3339());
-            
+
             if !project.metadata.commands.is_empty() {
                 println!("\nDiscovered Commands:");
                 let mut table = Table::new();

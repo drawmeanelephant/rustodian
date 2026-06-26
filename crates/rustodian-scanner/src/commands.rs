@@ -16,13 +16,14 @@ impl CommandDiscoverer {
 
         // 2. Node.js scripts if package.json exists
         if let Ok(content) = fs::read_to_string(root.join("package.json")) {
+            #[allow(clippy::collapsible_if)]
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                 if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
                     for (name, _) in scripts {
                         commands.push(ProjectCommand {
                             name: name.clone(),
                             description: Some("npm run script".to_string()),
-                            command: format!("npm run {}", name),
+                            command: format!("npm run {name}"),
                             source: "package.json".to_string(),
                         });
                     }
@@ -36,17 +37,25 @@ impl CommandDiscoverer {
             if let Ok(content) = fs::read_to_string(&path) {
                 for line in content.lines() {
                     let trimmed = line.trim();
-                    if trimmed.is_empty() || trimmed.starts_with('#') || line.starts_with(' ') || line.starts_with('\t') {
+                    if trimmed.is_empty()
+                        || trimmed.starts_with('#')
+                        || line.starts_with(' ')
+                        || line.starts_with('\t')
+                    {
                         continue;
                     }
                     if let Some(idx) = trimmed.find(':') {
                         let recipe_def = &trimmed[..idx];
+                        #[allow(clippy::collapsible_if)]
                         if let Some(n) = recipe_def.split_whitespace().next() {
-                            if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                            if !n.is_empty()
+                                && n.chars()
+                                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                            {
                                 commands.push(ProjectCommand {
                                     name: n.to_string(),
                                     description: Some("just recipe".to_string()),
-                                    command: format!("just {}", n),
+                                    command: format!("just {n}"),
                                     source: "justfile".to_string(),
                                 });
                             }
