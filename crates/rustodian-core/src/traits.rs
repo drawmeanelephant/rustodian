@@ -15,6 +15,7 @@ pub struct DiscoveredProject {
     pub name: String,
     pub path: std::path::PathBuf,
     pub languages: Vec<rustodian_types::LanguageDetection>,
+    pub commands: Vec<rustodian_types::ProjectCommand>,
 }
 
 /// Contract for project persistence.

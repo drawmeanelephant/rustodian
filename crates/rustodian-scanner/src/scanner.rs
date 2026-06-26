@@ -51,10 +51,13 @@ impl ProjectScanner for FsScanner {
                     .to_string_lossy()
                     .to_string();
 
+                let commands = crate::commands::CommandDiscoverer::discover(path);
+
                 projects.push(DiscoveredProject {
                     name,
                     path: path.to_path_buf(),
                     languages,
+                    commands,
                 });
             }
         }

@@ -74,21 +74,26 @@ impl Custodian {
             let project = if let Some(mut existing) = self.store.find_by_path(&d.path)? {
                 existing.name.clone_from(&d.name);
                 existing.languages.clone_from(&d.languages);
+                existing.metadata.commands.clone_from(&d.commands);
                 existing.vcs = vcs;
                 existing.last_scanned_at = Some(now);
                 projects_updated += 1;
                 existing
             } else {
                 projects_new += 1;
+
+                let mut metadata = rustodian_types::ProjectMetadata::default();
+                metadata.commands.clone_from(&d.commands);
+
                 Project {
-                    id: rustodian_types::ProjectId::new(),
+                    id: ProjectId::new(),
                     name: d.name.clone(),
                     path: d.path.clone(),
                     languages: d.languages.clone(),
                     vcs,
                     discovered_at: now,
                     last_scanned_at: Some(now),
-                    metadata: rustodian_types::ProjectMetadata::default(),
+                    metadata,
                 }
             };
 
@@ -135,6 +140,19 @@ impl Custodian {
         self.store
             .get_project(id)?
             .ok_or_else(|| CoreError::ProjectNotFound(id.clone()))
+    }
+
+    /// Find a project by name or ID string.
+    #[instrument(skip(self))]
+    pub fn find_project(&self, query: &str) -> Result<Option<Project>, CoreError> {
+        let all = self.store.list_projects()?;
+        if let Some(p) = all.iter().find(|p| p.name == query) {
+            return Ok(Some(p.clone()));
+        }
+        if let Some(p) = all.iter().find(|p| p.id.to_string() == query) {
+            return Ok(Some(p.clone()));
+        }
+        Ok(None)
     }
 }
 
