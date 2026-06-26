@@ -13,6 +13,8 @@ rustodian-core.workspace = true
 ignore.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+toml = "1.1.2"
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

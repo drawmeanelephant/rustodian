@@ -46,6 +46,15 @@ pub struct Project {
     pub metadata: ProjectMetadata,
 }
 
+/// A runnable command discovered in a project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectCommand {
+    pub name: String,
+    pub description: Option<String>,
+    pub command: String,
+    pub source: String, // e.g., "Cargo.toml", "package.json", "justfile"
+}
+
 /// Extensible metadata bag.
 ///
 /// Uses `serde(flatten)` with a JSON value to allow future fields
@@ -54,6 +63,8 @@ pub struct Project {
 pub struct ProjectMetadata {
     pub description: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub commands: Vec<ProjectCommand>,
     /// Catch-all for future fields.
     #[serde(flatten)]
     pub extra: serde_json::Value,
