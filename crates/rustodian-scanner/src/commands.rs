@@ -9,14 +9,31 @@ impl CommandDiscoverer {
     pub fn discover(root: &Path) -> Vec<ProjectCommand> {
         let mut commands = Vec::new();
 
-        // 1. Rust standard commands if Cargo.toml exists
+        // 1. Rustodian config (.rustodian.toml)
+        if let Ok(content) = fs::read_to_string(root.join(".rustodian.toml")) {
+            if let Ok(config) = toml::from_str::<toml::Value>(&content) {
+                if let Some(commands_table) = config.get("commands").and_then(|c| c.as_table()) {
+                    for (name, cmd) in commands_table {
+                        if let Some(cmd_str) = cmd.as_str() {
+                            commands.push(ProjectCommand {
+                                name: name.clone(),
+                                description: Some("rustodian config".to_string()),
+                                command: cmd_str.to_string(),
+                                source: ".rustodian.toml".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Rust standard commands if Cargo.toml exists
         if root.join("Cargo.toml").exists() {
             commands.extend(Self::rust_defaults());
         }
 
-        // 2. Node.js scripts if package.json exists
+        // 3. Node.js scripts if package.json exists
         if let Ok(content) = fs::read_to_string(root.join("package.json")) {
-            #[allow(clippy::collapsible_if)]
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                 if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
                     for (name, _) in scripts {
@@ -46,7 +63,6 @@ impl CommandDiscoverer {
                     }
                     if let Some(idx) = trimmed.find(':') {
                         let recipe_def = &trimmed[..idx];
-                        #[allow(clippy::collapsible_if)]
                         if let Some(n) = recipe_def.split_whitespace().next() {
                             if !n.is_empty()
                                 && n.chars()

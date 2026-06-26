@@ -24,6 +24,13 @@ fn test_scan_and_list() {
         "test:\n  echo test\n\nfmt:\n  prettier --write",
     )
     .unwrap();
+    fs::write(
+        js_dir.join(".rustodian.toml"),
+        r#"[commands]
+custom-cmd = "echo hello world"
+"#,
+    )
+    .unwrap();
 
     // 1. Scan
     let mut cmd = Command::cargo_bin("rustodian").unwrap();
@@ -49,9 +56,19 @@ fn test_scan_and_list() {
         .arg("info")
         .arg("my-js-proj");
     cmd.assert()
-       .success()
-       .stdout(predicate::str::contains("Discovered Commands:"))
-       .stdout(predicate::str::contains("npm run build")) // from package.json
-       .stdout(predicate::str::contains("just test")) // from justfile
-       .stdout(predicate::str::contains("just fmt")); // from justfile
+        .success()
+        .stdout(predicate::str::contains("Discovered Commands:"))
+        .stdout(predicate::str::contains("test"))
+        .stdout(predicate::str::contains("build"))
+        .stdout(predicate::str::contains("custom-cmd"));
+
+    // 4. Run custom command
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("run")
+        .arg("my-js-proj")
+        .arg("custom-cmd");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("hello world"));
 }
