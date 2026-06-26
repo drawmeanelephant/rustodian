@@ -11,7 +11,9 @@ impl CommandDiscoverer {
 
         // 1. Rustodian config (.rustodian.toml)
         let toml_content = fs::read_to_string(root.join(".rustodian.toml"));
-        let toml_config = toml_content.ok().and_then(|c| toml::from_str::<toml::Value>(&c).ok());
+        let toml_config = toml_content
+            .ok()
+            .and_then(|c| toml::from_str::<toml::Value>(&c).ok());
         if let Some(commands_table) = toml_config
             .as_ref()
             .and_then(|config| config.get("commands"))
@@ -36,7 +38,9 @@ impl CommandDiscoverer {
 
         // 3. Node.js scripts if package.json exists
         let pkg_content = fs::read_to_string(root.join("package.json"));
-        let pkg_json = pkg_content.ok().and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok());
+        let pkg_json = pkg_content
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok());
         if let Some(scripts) = pkg_json
             .as_ref()
             .and_then(|json| json.get("scripts"))
@@ -69,9 +73,8 @@ impl CommandDiscoverer {
                         let recipe_def = &trimmed[..idx];
                         if let Some(n) = recipe_def.split_whitespace().next().filter(|n| {
                             !n.is_empty()
-                                && n.chars().all(|c| {
-                                    c.is_ascii_alphanumeric() || c == '-' || c == '_'
-                                })
+                                && n.chars()
+                                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
                         }) {
                             commands.push(ProjectCommand {
                                 name: n.to_string(),

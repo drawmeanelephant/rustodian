@@ -138,7 +138,6 @@ impl Custodian {
                 ))
             })?;
 
-
         // Note: the command string might contain spaces (e.g., "npm run build")
         // we'll use sh -c to execute it cleanly on unix systems, which is adequate for now.
         let status = Command::new("sh")
