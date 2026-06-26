@@ -157,6 +157,8 @@ fn main() -> Result<()> {
             RemoteCommands::Refresh { dest } => commands::remote::execute_refresh(&store, &dest),
         },
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
-        Commands::Run { project, command } => commands::run::execute(&custodian, &project, &command),
+        Commands::Run { project, command } => {
+            commands::run::execute(&custodian, &project, &command)
+        }
     }
 }

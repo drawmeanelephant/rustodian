@@ -10,19 +10,21 @@ impl CommandDiscoverer {
         let mut commands = Vec::new();
 
         // 1. Rustodian config (.rustodian.toml)
-        if let Ok(content) = fs::read_to_string(root.join(".rustodian.toml")) {
-            if let Ok(config) = toml::from_str::<toml::Value>(&content) {
-                if let Some(commands_table) = config.get("commands").and_then(|c| c.as_table()) {
-                    for (name, cmd) in commands_table {
-                        if let Some(cmd_str) = cmd.as_str() {
-                            commands.push(ProjectCommand {
-                                name: name.clone(),
-                                description: Some("rustodian config".to_string()),
-                                command: cmd_str.to_string(),
-                                source: ".rustodian.toml".to_string(),
-                            });
-                        }
-                    }
+        let toml_content = fs::read_to_string(root.join(".rustodian.toml"));
+        let toml_config = toml_content.ok().and_then(|c| toml::from_str::<toml::Value>(&c).ok());
+        if let Some(commands_table) = toml_config
+            .as_ref()
+            .and_then(|config| config.get("commands"))
+            .and_then(|c| c.as_table())
+        {
+            for (name, cmd) in commands_table {
+                if let Some(cmd_str) = cmd.as_str() {
+                    commands.push(ProjectCommand {
+                        name: name.clone(),
+                        description: Some("rustodian config".to_string()),
+                        command: cmd_str.to_string(),
+                        source: ".rustodian.toml".to_string(),
+                    });
                 }
             }
         }
@@ -33,18 +35,20 @@ impl CommandDiscoverer {
         }
 
         // 3. Node.js scripts if package.json exists
-        if let Ok(content) = fs::read_to_string(root.join("package.json")) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
-                    for (name, _) in scripts {
-                        commands.push(ProjectCommand {
-                            name: name.clone(),
-                            description: Some("npm run script".to_string()),
-                            command: format!("npm run {name}"),
-                            source: "package.json".to_string(),
-                        });
-                    }
-                }
+        let pkg_content = fs::read_to_string(root.join("package.json"));
+        let pkg_json = pkg_content.ok().and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok());
+        if let Some(scripts) = pkg_json
+            .as_ref()
+            .and_then(|json| json.get("scripts"))
+            .and_then(|s| s.as_object())
+        {
+            for (name, _) in scripts {
+                commands.push(ProjectCommand {
+                    name: name.clone(),
+                    description: Some("npm run script".to_string()),
+                    command: format!("npm run {name}"),
+                    source: "package.json".to_string(),
+                });
             }
         }
 
@@ -63,18 +67,18 @@ impl CommandDiscoverer {
                     }
                     if let Some(idx) = trimmed.find(':') {
                         let recipe_def = &trimmed[..idx];
-                        if let Some(n) = recipe_def.split_whitespace().next() {
-                            if !n.is_empty()
-                                && n.chars()
-                                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                            {
-                                commands.push(ProjectCommand {
-                                    name: n.to_string(),
-                                    description: Some("just recipe".to_string()),
-                                    command: format!("just {n}"),
-                                    source: "justfile".to_string(),
-                                });
-                            }
+                        if let Some(n) = recipe_def.split_whitespace().next().filter(|n| {
+                            !n.is_empty()
+                                && n.chars().all(|c| {
+                                    c.is_ascii_alphanumeric() || c == '-' || c == '_'
+                                })
+                        }) {
+                            commands.push(ProjectCommand {
+                                name: n.to_string(),
+                                description: Some("just recipe".to_string()),
+                                command: format!("just {n}"),
+                                source: "justfile".to_string(),
+                            });
                         }
                     }
                 }

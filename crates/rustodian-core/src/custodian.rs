@@ -5,6 +5,7 @@
 //! irrelevant when every call hits the filesystem or database.
 
 use std::path::Path;
+use std::process::Command;
 
 use tracing::{info, instrument};
 
@@ -137,7 +138,6 @@ impl Custodian {
                 ))
             })?;
 
-        use std::process::Command;
 
         // Note: the command string might contain spaces (e.g., "npm run build")
         // we'll use sh -c to execute it cleanly on unix systems, which is adequate for now.

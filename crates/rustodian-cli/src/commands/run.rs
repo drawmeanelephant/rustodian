@@ -1,10 +1,10 @@
 //! The `run` command.
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use rustodian_core::Custodian;
 
 pub fn execute(custodian: &Custodian, project_query: &str, command_name: &str) -> Result<()> {
-    println!("Running command '{}' in project '{}'...", command_name, project_query);
+    println!("Running command '{command_name}' in project '{project_query}'...");
     custodian
         .run_command(project_query, command_name)
         .context("Failed to run command")?;
