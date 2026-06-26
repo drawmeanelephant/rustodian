@@ -5,6 +5,7 @@
 //! irrelevant when every call hits the filesystem or database.
 
 use std::path::Path;
+use std::process::Command;
 
 use tracing::{info, instrument};
 
@@ -117,6 +118,42 @@ impl Custodian {
             projects_new,
             projects_updated,
         })
+    }
+
+    /// Finds a project and executes the given command name if discovered.
+    pub fn run_command(&self, project_query: &str, command_name: &str) -> Result<(), CoreError> {
+        let project = self
+            .find_project(project_query)?
+            .ok_or_else(|| CoreError::Storage(format!("Project not found: {project_query}")))?;
+
+        let cmd = project
+            .metadata
+            .commands
+            .iter()
+            .find(|c| c.name == command_name)
+            .ok_or_else(|| {
+                CoreError::Storage(format!(
+                    "Command '{}' not found in project '{}'",
+                    command_name, project.name
+                ))
+            })?;
+
+        // Note: the command string might contain spaces (e.g., "npm run build")
+        // we'll use sh -c to execute it cleanly on unix systems, which is adequate for now.
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(&cmd.command)
+            .current_dir(&project.path)
+            .status()
+            .map_err(|e| CoreError::Storage(format!("Failed to execute command: {e}")))?;
+
+        if !status.success() {
+            return Err(CoreError::Storage(format!(
+                "Command exited with non-zero status: {status}"
+            )));
+        }
+
+        Ok(())
     }
 
     /// List all tracked projects.

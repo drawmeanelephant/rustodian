@@ -84,6 +84,14 @@ enum Commands {
         /// Project name or ID
         project: String,
     },
+
+    /// Run a discovered command for a project
+    Run {
+        /// Project name or ID
+        project: String,
+        /// Command name to run
+        command: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -149,5 +157,8 @@ fn main() -> Result<()> {
             RemoteCommands::Refresh { dest } => commands::remote::execute_refresh(&store, &dest),
         },
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
+        Commands::Run { project, command } => {
+            commands::run::execute(&custodian, &project, &command)
+        }
     }
 }
