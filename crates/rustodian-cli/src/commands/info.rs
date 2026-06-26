@@ -10,7 +10,7 @@ use crate::OutputFormat;
 pub fn execute(custodian: &Custodian, project_query: &str, format: &OutputFormat) -> Result<()> {
     let project = custodian
         .find_project(project_query)?
-        .ok_or_else(|| anyhow!("Project not found: {}", project_query))?;
+        .ok_or_else(|| anyhow!("Project not found: {project_query}"))?;
 
     match format {
         OutputFormat::Json => {
@@ -27,11 +27,11 @@ pub fn execute(custodian: &Custodian, project_query: &str, format: &OutputFormat
                     .map(|l| l.language.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                println!("Languages: {}", langs);
+                println!("Languages: {langs}");
             }
             if let Some(vcs) = &project.vcs {
                 if let Some(remote) = &vcs.remote_url {
-                    println!("Git Remote: {}", remote);
+                    println!("Git Remote: {remote}");
                 }
                 if let Some(commit) = &vcs.last_commit {
                     println!("Commit: {}", commit.sha);
@@ -39,7 +39,9 @@ pub fn execute(custodian: &Custodian, project_query: &str, format: &OutputFormat
             }
             println!("Discovered: {}", project.discovered_at.to_rfc3339());
 
-            if !project.metadata.commands.is_empty() {
+            if project.metadata.commands.is_empty() {
+                println!("\nNo runnable commands discovered.");
+            } else {
                 println!("\nDiscovered Commands:");
                 let mut table = Table::new();
                 table.set_header(vec!["Name", "Command", "Source", "Description"]);
@@ -52,8 +54,6 @@ pub fn execute(custodian: &Custodian, project_query: &str, format: &OutputFormat
                     ]);
                 }
                 println!("{table}");
-            } else {
-                println!("\nNo runnable commands discovered.");
             }
         }
     }
