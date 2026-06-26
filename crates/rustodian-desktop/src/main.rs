@@ -76,6 +76,35 @@ struct RunningProcess {
 }
 
 // ---------------------------------------------------------------------------
+// Document cache state
+// ---------------------------------------------------------------------------
+
+/// Candidate filenames to discover in project directories.
+const DOC_CANDIDATES: &[&str] = &[
+    "TODO.md",
+    "todo.md",
+    "CHANGELOG.md",
+    "changelog.md",
+    "README.md",
+    "readme.md",
+    "TASKS.md",
+    "tasks.md",
+    "task.md",
+];
+
+/// Cached state for the Tasks / Documents panel.
+struct DocCache {
+    /// Project path this cache was built for (invalidation key).
+    project_path: std::path::PathBuf,
+    /// Discovered doc files: `(display_name, absolute_path)`.
+    available_docs: Vec<(String, std::path::PathBuf)>,
+    /// Index into `available_docs` currently being viewed.
+    selected_index: usize,
+    /// The loaded text content of the currently selected file.
+    content: String,
+}
+
+// ---------------------------------------------------------------------------
 // Application state
 // ---------------------------------------------------------------------------
 
@@ -90,6 +119,8 @@ struct RustodianApp {
     run_state: Option<Arc<Mutex<CommandRunState>>>,
     /// Holds the `Child` handle so the GUI can kill the process.
     running_process: Option<RunningProcess>,
+    /// Cached document content for the Tasks tab.
+    doc_cache: Option<DocCache>,
 }
 
 impl RustodianApp {
@@ -262,6 +293,7 @@ impl eframe::App for RustodianApp {
                         if switching {
                             self.kill_running_process();
                             self.run_state = None;
+                            self.doc_cache = None;
                         }
                         self.selected_project = Some(proj);
                     }
@@ -321,7 +353,7 @@ impl eframe::App for RustodianApp {
                         ui.label("GitHub PRs will go here.");
                     }
                     Tab::Tasks => {
-                        ui.label("TODO.md / CHANGELOG.md parsing will go here.");
+                        self.render_tasks_tab(ui);
                     }
                     Tab::RunnerLogs => {
                         self.render_runner_logs(ui, ctx);
@@ -469,4 +501,249 @@ impl RustodianApp {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tasks / Documents tab rendering
+// ---------------------------------------------------------------------------
+
+impl RustodianApp {
+    fn render_tasks_tab(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+
+        self.ensure_doc_cache(&project);
+
+        if self
+            .doc_cache
+            .as_ref()
+            .is_none_or(|c| c.available_docs.is_empty())
+        {
+            ui.label(
+                "No documentation files (TODO.md, CHANGELOG.md, README.md) found in this project.",
+            );
+            return;
+        }
+
+        // Top bar: document selector tabs + refresh button.
+        let mut needs_reload = false;
+        ui.horizontal(|ui| {
+            let cache = self.doc_cache.as_mut().unwrap();
+            for (i, (name, _)) in cache.available_docs.iter().enumerate() {
+                if ui
+                    .selectable_label(cache.selected_index == i, name)
+                    .clicked()
+                    && cache.selected_index != i
+                {
+                    cache.selected_index = i;
+                    needs_reload = true;
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("\u{1f504} Refresh").clicked() {
+                    needs_reload = true;
+                }
+            });
+        });
+        ui.separator();
+
+        if needs_reload {
+            self.reload_selected_doc();
+        }
+
+        // Render the document content in a scrollable area.
+        let content = match &self.doc_cache {
+            Some(c) => c.content.clone(),
+            None => return,
+        };
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            render_markdown_lines(ui, &content);
+        });
+    }
+
+    /// Build or validate the document cache for the given project.
+    fn ensure_doc_cache(&mut self, project: &Project) {
+        if let Some(cache) = &self.doc_cache
+            && cache.project_path == project.path
+        {
+            return; // cache is still valid
+        }
+
+        let available_docs = discover_docs(&project.path);
+        let content = if available_docs.is_empty() {
+            String::new()
+        } else {
+            std::fs::read_to_string(&available_docs[0].1)
+                .unwrap_or_else(|e| format!("Error reading file: {e}"))
+        };
+
+        self.doc_cache = Some(DocCache {
+            project_path: project.path.clone(),
+            available_docs,
+            selected_index: 0,
+            content,
+        });
+    }
+
+    /// Reload the currently selected document from disk.
+    fn reload_selected_doc(&mut self) {
+        if let Some(cache) = &mut self.doc_cache
+            && let Some((_, path)) = cache.available_docs.get(cache.selected_index)
+        {
+            cache.content = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| format!("Error reading file: {e}"));
+        }
+    }
+}
+
+/// Discover documentation files in the given project root directory.
+///
+/// Returns a list of `(display_name, absolute_path)` pairs. On
+/// case-insensitive file systems the first matching casing variant wins,
+/// preventing duplicates (e.g. both `TODO.md` and `todo.md` resolving to the
+/// same file).
+fn discover_docs(project_path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    let mut found = Vec::new();
+    let mut seen_lower = std::collections::HashSet::new();
+    for &name in DOC_CANDIDATES {
+        let lower = name.to_lowercase();
+        if seen_lower.contains(&lower) {
+            continue;
+        }
+        let full_path = project_path.join(name);
+        if full_path.is_file() {
+            seen_lower.insert(lower);
+            found.push((name.to_string(), full_path));
+        }
+    }
+    found
+}
+
+/// Lightweight line-by-line markdown renderer using native `egui` widgets.
+///
+/// Handles headers, task checkboxes, bullet/numbered lists, code blocks,
+/// horizontal rules, and plain text. Not a full `CommonMark` implementation –
+/// just enough to make project documentation readable at a glance.
+fn render_markdown_lines(ui: &mut egui::Ui, text: &str) {
+    let mut in_code_block = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // ── Code fences ──────────────────────────────────────────────
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            ui.monospace(line);
+            continue;
+        }
+
+        // ── Blank lines ──────────────────────────────────────────────
+        if trimmed.is_empty() {
+            ui.add_space(4.0);
+            continue;
+        }
+
+        // ── Horizontal rules ─────────────────────────────────────────
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            ui.separator();
+            continue;
+        }
+
+        // ── Headers (#### → #) ───────────────────────────────────────
+        if let Some(rest) = trimmed.strip_prefix("#### ") {
+            ui.add_space(2.0);
+            ui.label(egui::RichText::new(rest).size(14.0).strong());
+            ui.add_space(2.0);
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("### ") {
+            ui.add_space(2.0);
+            ui.label(egui::RichText::new(rest).size(15.0).strong());
+            ui.add_space(2.0);
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("## ") {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(rest).size(18.0).strong());
+            ui.add_space(2.0);
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("# ") {
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(rest).size(22.0).strong());
+            ui.add_space(4.0);
+            continue;
+        }
+
+        // ── Task checkboxes: - [x], - [X], - [ ] ────────────────────
+        if let Some(rest) = strip_task_prefix(trimmed, true) {
+            ui.horizontal(|ui| {
+                let mut checked = true;
+                ui.add_enabled(false, egui::Checkbox::without_text(&mut checked));
+                ui.label(rest);
+            });
+            continue;
+        }
+        if let Some(rest) = strip_task_prefix(trimmed, false) {
+            ui.horizontal(|ui| {
+                let mut checked = false;
+                ui.add_enabled(false, egui::Checkbox::without_text(&mut checked));
+                ui.label(rest);
+            });
+            continue;
+        }
+
+        // ── Bullet list items ────────────────────────────────────────
+        if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            ui.horizontal(|ui| {
+                ui.label("  \u{2022}");
+                ui.label(rest);
+            });
+            continue;
+        }
+
+        // ── Numbered list items ──────────────────────────────────────
+        if let Some(dot_pos) = trimmed.find(". ") {
+            let prefix = &trimmed[..dot_pos];
+            if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
+                let number = &trimmed[..=dot_pos]; // e.g. "1."
+                let rest = &trimmed[dot_pos + 2..]; // text after ". "
+                ui.horizontal(|ui| {
+                    ui.label(format!("  {number}"));
+                    ui.label(rest);
+                });
+                continue;
+            }
+        }
+
+        // ── Default: plain text ──────────────────────────────────────
+        ui.label(line);
+    }
+}
+
+/// Try to strip a task checkbox prefix (`- [x] `, `- [X] `, `- [ ] `, or
+/// the `*` variants) from the beginning of a line.
+///
+/// `checked` selects whether to match the checked (`[x]`/`[X]`) or unchecked
+/// (`[ ]`) variant.
+fn strip_task_prefix(line: &str, checked: bool) -> Option<&str> {
+    let patterns: &[&str] = if checked {
+        &["- [x] ", "- [X] ", "* [x] ", "* [X] "]
+    } else {
+        &["- [ ] ", "* [ ] "]
+    };
+    for pat in patterns {
+        if let Some(rest) = line.strip_prefix(pat) {
+            return Some(rest);
+        }
+    }
+    None
 }
