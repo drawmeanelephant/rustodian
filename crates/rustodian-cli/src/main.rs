@@ -137,7 +137,8 @@ fn main() -> Result<()> {
     let scanner = FsScanner;
     let git = Git2Inspector;
 
-    let custodian = Custodian::new(Box::new(store.clone()), Box::new(scanner), Box::new(git));
+    let runner = rustodian_core::runner::DefaultCommandRunner;
+    let custodian = Custodian::new(Box::new(store.clone()), Box::new(scanner), Box::new(git), Box::new(runner));
 
     // Dispatch command
     match cli.command {

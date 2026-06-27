@@ -10,7 +10,9 @@ repository.workspace = true
 [dependencies]
 async-trait = "0.1"
 chrono.workspace = true
+nix = { version = "0.31.3", features = ["process", "signal"] }
 rustodian-types.workspace = true
+shlex = "2.0.1"
 thiserror.workspace = true
 tracing.workspace = true
 

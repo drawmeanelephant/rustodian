@@ -77,3 +77,18 @@ pub trait RemoteProjectStore: Send + Sync {
     fn list_remote_projects(&self) -> Result<Vec<RemoteProject>, crate::error::CoreError>;
     fn delete_remote_project(&self, repo_slug: &str) -> Result<bool, crate::error::CoreError>;
 }
+
+use crate::runner::CommandSpec;
+
+pub trait RunningProcess: Send + Sync {
+    fn id(&self) -> u32;
+    fn wait(&mut self) -> Result<(), CoreError>;
+    fn try_wait(&mut self) -> Result<Option<()>, CoreError>;
+    fn kill(&mut self) -> Result<(), CoreError>;
+    fn stdout(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>>;
+    fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>>;
+}
+
+pub trait CommandRunner: Send + Sync {
+    fn spawn(&self, spec: CommandSpec) -> Result<Box<dyn RunningProcess>, CoreError>;
+}

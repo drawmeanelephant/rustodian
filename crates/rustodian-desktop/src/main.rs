@@ -4,7 +4,10 @@ use rustodian_core::traits::ProjectStore;
 use rustodian_storage::SqliteStore;
 use rustodian_types::Project;
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::collections::HashMap;
+
+use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
+use rustodian_core::traits::CommandRunner;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -72,7 +75,7 @@ struct CommandRunState {
 /// Handle to the spawned child process. Kept on the main thread so the GUI
 /// can send a kill signal via the "Stop" button.
 struct RunningProcess {
-    child: Child,
+    child: Box<dyn rustodian_core::traits::RunningProcess>,
 }
 
 // ---------------------------------------------------------------------------
@@ -163,16 +166,16 @@ impl RustodianApp {
             exit_status: None,
         }));
         self.run_state = Some(Arc::clone(&state));
+        let spec = CommandSpec {
+            program: command_str.to_string(),
+            args: vec![],
+            working_dir: project_path.to_path_buf(),
+            env: HashMap::new(),
+            use_shell: false,
+        };
 
-        // Spawn the child process using a shell wrapper so that pipes,
-        // environment variables, and complex command strings work correctly.
-        let spawn_result = Command::new("sh")
-            .arg("-c")
-            .arg(command_str)
-            .current_dir(project_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
+        let runner = DefaultCommandRunner;
+        let spawn_result = runner.spawn(spec);
 
         let mut child = match spawn_result {
             Ok(c) => c,
@@ -187,8 +190,8 @@ impl RustodianApp {
         };
 
         // Take ownership of the pipe handles before moving the child.
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+        let stdout = child.stdout();
+        let stderr = child.stderr();
 
         // Store the child handle so the GUI can kill it.
         self.running_process = Some(RunningProcess { child });
