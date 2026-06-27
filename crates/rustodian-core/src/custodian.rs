@@ -4,15 +4,16 @@
 //! Uses `Box<dyn Trait>` for simplicity — dynamic dispatch overhead is
 //! irrelevant when every call hits the filesystem or database.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 
 use tracing::{info, instrument};
 
 use rustodian_types::{Project, ProjectId, ScanConfig, ScanId, ScanRecord};
 
 use crate::error::CoreError;
-use crate::traits::{GitInspector, ProjectScanner, ProjectStore};
+use crate::runner::CommandSpec;
+use crate::traits::{CommandRunner, GitInspector, ProjectScanner, ProjectStore};
 
 /// Report from a scan operation.
 #[derive(Debug)]
@@ -41,6 +42,7 @@ pub struct Custodian {
     scanner: Box<dyn ProjectScanner>,
     #[allow(dead_code)]
     git: Box<dyn GitInspector>,
+    runner: Box<dyn CommandRunner>,
 }
 
 impl Custodian {
@@ -49,11 +51,13 @@ impl Custodian {
         store: Box<dyn ProjectStore>,
         scanner: Box<dyn ProjectScanner>,
         git: Box<dyn GitInspector>,
+        runner: Box<dyn CommandRunner>,
     ) -> Self {
         Self {
             store,
             scanner,
             git,
+            runner,
         }
     }
 
@@ -138,20 +142,16 @@ impl Custodian {
                 ))
             })?;
 
-        // Note: the command string might contain spaces (e.g., "npm run build")
-        // we'll use sh -c to execute it cleanly on unix systems, which is adequate for now.
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(&cmd.command)
-            .current_dir(&project.path)
-            .status()
-            .map_err(|e| CoreError::Storage(format!("Failed to execute command: {e}")))?;
+        let spec = CommandSpec {
+            program: cmd.command.clone(),
+            args: vec![],
+            working_dir: project.path.clone(),
+            env: HashMap::new(),
+            use_shell: false,
+        };
 
-        if !status.success() {
-            return Err(CoreError::Storage(format!(
-                "Command exited with non-zero status: {status}"
-            )));
-        }
+        let mut child = self.runner.spawn(spec)?;
+        child.wait()?;
 
         Ok(())
     }

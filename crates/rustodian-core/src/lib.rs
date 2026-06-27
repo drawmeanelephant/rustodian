@@ -14,6 +14,7 @@
 
 pub mod custodian;
 pub mod error;
+pub mod runner;
 pub mod traits;
 
 pub use custodian::Custodian;
