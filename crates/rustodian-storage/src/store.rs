@@ -85,6 +85,70 @@ fn dirs_next_or_fallback() -> PathBuf {
         .join("rustodian")
 }
 
+/// Parse raw column values into a [`Project`].
+///
+/// Used by `get_project`, `list_projects`, and `find_by_path` to avoid
+/// duplicating the deserialization logic.
+fn parse_project_row(
+    id_str: &str,
+    name: String,
+    path_str: String,
+    disc_str: &str,
+    scan_str: Option<String>,
+    meta_str: &str,
+) -> Result<Project, CoreError> {
+    let id = ProjectId(
+        uuid::Uuid::parse_str(id_str)
+            .map_err(|e| CoreError::Storage(format!("invalid project UUID '{id_str}': {e}")))?,
+    );
+    let path = PathBuf::from(path_str);
+    let discovered_at = chrono::DateTime::parse_from_rfc3339(disc_str)
+        .map_err(|e| CoreError::Storage(format!("invalid timestamp '{disc_str}': {e}")))?  
+        .with_timezone(&chrono::Utc);
+    let last_scanned_at = scan_str
+        .map(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .map_err(|e| CoreError::Storage(format!("invalid timestamp '{s}': {e}")))
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+        })
+        .transpose()?;
+
+    let meta_json: serde_json::Value =
+        serde_json::from_str(meta_str).unwrap_or(serde_json::json!({}));
+    let metadata: ProjectMetadata = serde_json::from_value(
+        meta_json
+            .get("meta")
+            .cloned()
+            .unwrap_or(serde_json::json!({})),
+    )
+    .unwrap_or_default();
+    let vcs = serde_json::from_value(
+        meta_json
+            .get("vcs")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    )
+    .unwrap_or(None);
+    let languages = serde_json::from_value(
+        meta_json
+            .get("languages")
+            .cloned()
+            .unwrap_or(serde_json::json!([])),
+    )
+    .unwrap_or_default();
+
+    Ok(Project {
+        id,
+        name,
+        path,
+        languages,
+        vcs,
+        discovered_at,
+        last_scanned_at,
+        metadata,
+    })
+}
+
 impl ProjectStore for SqliteStore {
     fn save_project(&self, project: &Project) -> Result<ProjectId, CoreError> {
         let conn = self
@@ -157,51 +221,7 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
         if let Some((id_str, name, path_str, disc_str, scan_str, meta_str)) = project {
-            let id = ProjectId(uuid::Uuid::parse_str(&id_str).unwrap_or_default());
-            let path = PathBuf::from(path_str);
-            let discovered_at = chrono::DateTime::parse_from_rfc3339(&disc_str)
-                .unwrap()
-                .with_timezone(&chrono::Utc);
-            let last_scanned_at = scan_str.map(|s| {
-                chrono::DateTime::parse_from_rfc3339(&s)
-                    .unwrap()
-                    .with_timezone(&chrono::Utc)
-            });
-
-            let meta_json: serde_json::Value =
-                serde_json::from_str(&meta_str).unwrap_or(serde_json::json!({}));
-            let metadata: ProjectMetadata = serde_json::from_value(
-                meta_json
-                    .get("meta")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({})),
-            )
-            .unwrap_or_default();
-            let vcs = serde_json::from_value(
-                meta_json
-                    .get("vcs")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            )
-            .unwrap_or(None);
-            let languages = serde_json::from_value(
-                meta_json
-                    .get("languages")
-                    .cloned()
-                    .unwrap_or(serde_json::json!([])),
-            )
-            .unwrap_or_default();
-
-            Ok(Some(Project {
-                id,
-                name,
-                path,
-                languages,
-                vcs,
-                discovered_at,
-                last_scanned_at,
-                metadata,
-            }))
+            Ok(Some(parse_project_row(&id_str, name, path_str, &disc_str, scan_str, &meta_str)?))
         } else {
             Ok(None)
         }
@@ -229,52 +249,18 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query map error: {e}")))?;
 
         let mut projects = Vec::new();
-        for (id_str, name, path_str, disc_str, scan_str, meta_str) in rows.flatten() {
-            let id = ProjectId(uuid::Uuid::parse_str(&id_str).unwrap_or_default());
-            let path = PathBuf::from(path_str);
-            let discovered_at = chrono::DateTime::parse_from_rfc3339(&disc_str)
-                .unwrap()
-                .with_timezone(&chrono::Utc);
-            let last_scanned_at = scan_str.map(|s| {
-                chrono::DateTime::parse_from_rfc3339(&s)
-                    .unwrap()
-                    .with_timezone(&chrono::Utc)
-            });
-
-            let meta_json: serde_json::Value =
-                serde_json::from_str(&meta_str).unwrap_or(serde_json::json!({}));
-            let metadata: ProjectMetadata = serde_json::from_value(
-                meta_json
-                    .get("meta")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({})),
-            )
-            .unwrap_or_default();
-            let vcs = serde_json::from_value(
-                meta_json
-                    .get("vcs")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            )
-            .unwrap_or(None);
-            let languages = serde_json::from_value(
-                meta_json
-                    .get("languages")
-                    .cloned()
-                    .unwrap_or(serde_json::json!([])),
-            )
-            .unwrap_or_default();
-
-            projects.push(Project {
-                id,
-                name,
-                path,
-                languages,
-                vcs,
-                discovered_at,
-                last_scanned_at,
-                metadata,
-            });
+        for row_result in rows {
+            let (id_str, name, path_str, disc_str, scan_str, meta_str) = match row_result {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("Skipping malformed project row: {e}");
+                    continue;
+                }
+            };
+            match parse_project_row(&id_str, name, path_str, &disc_str, scan_str, &meta_str) {
+                Ok(proj) => projects.push(proj),
+                Err(e) => tracing::warn!("Skipping invalid project data: {e}"),
+            }
         }
         Ok(projects)
     }
@@ -316,51 +302,7 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
         if let Some((id_str, name, path_str, disc_str, scan_str, meta_str)) = project {
-            let id = ProjectId(uuid::Uuid::parse_str(&id_str).unwrap_or_default());
-            let path = PathBuf::from(path_str);
-            let discovered_at = chrono::DateTime::parse_from_rfc3339(&disc_str)
-                .unwrap()
-                .with_timezone(&chrono::Utc);
-            let last_scanned_at = scan_str.map(|s| {
-                chrono::DateTime::parse_from_rfc3339(&s)
-                    .unwrap()
-                    .with_timezone(&chrono::Utc)
-            });
-
-            let meta_json: serde_json::Value =
-                serde_json::from_str(&meta_str).unwrap_or(serde_json::json!({}));
-            let metadata: ProjectMetadata = serde_json::from_value(
-                meta_json
-                    .get("meta")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({})),
-            )
-            .unwrap_or_default();
-            let vcs = serde_json::from_value(
-                meta_json
-                    .get("vcs")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            )
-            .unwrap_or(None);
-            let languages = serde_json::from_value(
-                meta_json
-                    .get("languages")
-                    .cloned()
-                    .unwrap_or(serde_json::json!([])),
-            )
-            .unwrap_or_default();
-
-            Ok(Some(Project {
-                id,
-                name,
-                path,
-                languages,
-                vcs,
-                discovered_at,
-                last_scanned_at,
-                metadata,
-            }))
+            Ok(Some(parse_project_row(&id_str, name, path_str, &disc_str, scan_str, &meta_str)?))
         } else {
             Ok(None)
         }
@@ -416,16 +358,21 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
         if let Some((id_str, root_str, start_str, end_str, found, status_str)) = scan {
-            let id = ScanId(uuid::Uuid::parse_str(&id_str).unwrap_or_default());
+            let id = ScanId(
+                uuid::Uuid::parse_str(&id_str)
+                    .map_err(|e| CoreError::Storage(format!("invalid scan UUID '{id_str}': {e}")))?,
+            );
             let root_path = PathBuf::from(root_str);
             let started_at = chrono::DateTime::parse_from_rfc3339(&start_str)
-                .unwrap()
+                .map_err(|e| CoreError::Storage(format!("invalid timestamp '{start_str}': {e}")))?  
                 .with_timezone(&chrono::Utc);
-            let completed_at = end_str.map(|s| {
-                chrono::DateTime::parse_from_rfc3339(&s)
-                    .unwrap()
-                    .with_timezone(&chrono::Utc)
-            });
+            let completed_at = end_str
+                .map(|s| {
+                    chrono::DateTime::parse_from_rfc3339(&s)
+                        .map_err(|e| CoreError::Storage(format!("invalid timestamp '{s}': {e}")))
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                })
+                .transpose()?;
             let status = match status_str.as_str() {
                 "running" => ScanStatus::Running,
                 "completed" => ScanStatus::Completed,

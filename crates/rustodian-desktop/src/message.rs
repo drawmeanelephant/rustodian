@@ -1,0 +1,77 @@
+//! Message passing types for the Desktop GUI.
+
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+use rustodian_types::{Project, ProjectId};
+use rustodian_core::log_buffer::LogBuffer;
+
+/// Messages sent from the GUI thread to the Background Worker thread.
+pub enum GuiMessage {
+    /// Load all projects from the database.
+    LoadProjects,
+    /// Run a command for a project.
+    RunCommand {
+        project_id: ProjectId,
+        project_path: PathBuf,
+        command_name: String,
+        command_str: String,
+    },
+    /// Kill the currently running command (if any).
+    KillCommand,
+    /// Discover documentation files in a project root.
+    DiscoverDocs {
+        project_path: PathBuf,
+    },
+    /// Load the content of a specific document file.
+    LoadDocContent {
+        path: PathBuf,
+    },
+}
+
+/// A parsed markdown block.
+#[derive(Debug, Clone)]
+pub enum MarkdownBlock {
+    Header { level: usize, text: String },
+    CodeFence { text: String },
+    HorizontalRule,
+    Task { text: String, checked: bool },
+    BulletList { text: String },
+    NumberedList { number: String, text: String },
+    Text { text: String },
+    BlankLine,
+}
+
+/// Memoized markdown content.
+#[derive(Debug, Clone)]
+pub struct ParsedMarkdown {
+    pub blocks: Vec<MarkdownBlock>,
+}
+
+/// Messages sent from the Background Worker thread to the GUI thread.
+pub enum WorkerMessage {
+    /// Result of loading projects.
+    ProjectsLoaded(Result<Vec<Project>, String>),
+    
+    /// Status update for a running command.
+    CommandStatus {
+        command_name: String,
+        is_running: bool,
+        exit_status: Option<String>,
+        log_buffer: LogBuffer,
+    },
+    
+    /// Result of discovering documentation files.
+    DocsDiscovered {
+        project_path: PathBuf,
+        available_docs: Vec<(String, PathBuf)>,
+    },
+    
+    /// Result of loading and parsing a document.
+    DocLoaded {
+        path: PathBuf,
+        content: String,
+        parsed: ParsedMarkdown,
+        last_modified: Option<SystemTime>,
+    },
+}

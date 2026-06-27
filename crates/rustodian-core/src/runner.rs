@@ -9,6 +9,20 @@ pub struct CommandSpec {
     pub working_dir: PathBuf,
     pub env: HashMap<String, String>,
     pub use_shell: bool,
+    pub capture_output: bool,
+}
+
+impl Default for CommandSpec {
+    fn default() -> Self {
+        Self {
+            program: String::new(),
+            args: vec![],
+            working_dir: PathBuf::from("."),
+            env: HashMap::new(),
+            use_shell: false,
+            capture_output: false,
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -28,8 +42,13 @@ pub struct DefaultCommandRunner;
 impl CommandRunner for DefaultCommandRunner {
     fn spawn(&self, spec: CommandSpec) -> Result<Box<dyn RunningProcess>, CoreError> {
         let mut cmd = if spec.use_shell {
+            let shell_cmd = if spec.args.is_empty() {
+                spec.program.clone()
+            } else {
+                format!("{} {}", spec.program, spec.args.join(" "))
+            };
             let mut c = Command::new("sh");
-            c.arg("-c").arg(&spec.program);
+            c.arg("-c").arg(&shell_cmd);
             c
         } else {
             // If the user specifies `use_shell=false`, but `spec.program` is actually a full command string,
@@ -50,9 +69,13 @@ impl CommandRunner for DefaultCommandRunner {
         };
 
         cmd.current_dir(&spec.working_dir)
-            .envs(&spec.env)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
+            .envs(&spec.env);
+
+        if spec.capture_output {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        } else {
+            cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        }
 
         #[cfg(unix)]
         cmd.process_group(0); // Create a new process group

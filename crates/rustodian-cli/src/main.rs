@@ -92,6 +92,16 @@ enum Commands {
         /// Command name to run
         command: String,
     },
+
+    /// View logs for a project
+    Logs {
+        /// Project name or ID
+        project: String,
+
+        /// Limit number of logs shown
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -165,6 +175,9 @@ fn main() -> Result<()> {
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
         Commands::Run { project, command } => {
             commands::run::execute(&custodian, &project, &command)
+        }
+        Commands::Logs { project, limit } => {
+            commands::logs::execute(&custodian, &store, &project, limit, &cli.format)
         }
     }
 }

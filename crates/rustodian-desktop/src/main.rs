@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
 use eframe::egui;
-use rustodian_core::traits::ProjectStore;
 use rustodian_storage::SqliteStore;
 use rustodian_types::Project;
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 
-use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
-use rustodian_core::traits::CommandRunner;
-use std::sync::{Arc, Mutex};
-use std::thread;
+mod message;
+mod worker;
+
+use message::{GuiMessage, MarkdownBlock, ParsedMarkdown, WorkerMessage};
+use rustodian_core::log_buffer::LogBuffer;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -19,18 +19,27 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Rustodian Desktop",
         options,
-        Box::new(|_cc| {
-            // Attempt to load the DB
+        Box::new(|cc| {
             let store = match setup_db() {
-                Ok(s) => Some(Arc::new(s)),
+                Ok(s) => Arc::new(s),
                 Err(e) => {
                     eprintln!("Failed to setup DB: {e}");
-                    None
+                    // We might want to handle this better in a real app, but for now just panic
+                    panic!("Failed to setup DB: {e}");
                 }
             };
 
+            let (gui_tx, worker_rx) = std::sync::mpsc::channel();
+            let (worker_tx, gui_rx) = std::sync::mpsc::channel();
+
+            let ctx_clone = cc.egui_ctx.clone();
+            std::thread::spawn(move || {
+                worker::run_worker(store, worker_rx, worker_tx, ctx_clone);
+            });
+
             let mut app = RustodianApp {
-                store,
+                worker_tx: gui_tx,
+                worker_rx: gui_rx,
                 ..Default::default()
             };
             app.load_projects();
@@ -55,211 +64,166 @@ enum Tab {
     RunnerLogs,
 }
 
-// ---------------------------------------------------------------------------
-// Command runner shared state
-// ---------------------------------------------------------------------------
-
-/// Shared state for the background command runner, accessed by both the
-/// background reader thread and the GUI thread.
-struct CommandRunState {
-    /// The name of the command being run (for display purposes).
-    command_name: String,
-    /// Accumulated stdout + stderr output.
-    output_log: String,
-    /// Whether the process is still running.
-    running: bool,
-    /// Exit status message (set when the process finishes).
-    exit_status: Option<String>,
-}
-
-/// Handle to the spawned child process. Kept on the main thread so the GUI
-/// can send a kill signal via the "Stop" button.
-struct RunningProcess {
-    child: Box<dyn rustodian_core::traits::RunningProcess>,
-}
-
-// ---------------------------------------------------------------------------
-// Document cache state
-// ---------------------------------------------------------------------------
-
-/// Candidate filenames to discover in project directories.
-const DOC_CANDIDATES: &[&str] = &[
-    "TODO.md",
-    "todo.md",
-    "CHANGELOG.md",
-    "changelog.md",
-    "README.md",
-    "readme.md",
-    "TASKS.md",
-    "tasks.md",
-    "task.md",
-];
-
-/// Cached state for the Tasks / Documents panel.
 struct DocCache {
-    /// Project path this cache was built for (invalidation key).
     project_path: std::path::PathBuf,
-    /// Discovered doc files: `(display_name, absolute_path)`.
     available_docs: Vec<(String, std::path::PathBuf)>,
-    /// Index into `available_docs` currently being viewed.
     selected_index: usize,
-    /// The loaded text content of the currently selected file.
     content: String,
+    parsed: ParsedMarkdown,
+    last_modified: Option<SystemTime>,
+    last_checked: Instant,
 }
-
-// ---------------------------------------------------------------------------
-// Application state
-// ---------------------------------------------------------------------------
 
 #[derive(Default)]
 struct RustodianApp {
     selected_tab: Tab,
     selected_project: Option<Project>,
-    store: Option<Arc<SqliteStore>>,
     projects: Vec<Project>,
     db_error: Option<String>,
-    /// Shared log buffer + status flag, polled every frame when a command is active.
-    run_state: Option<Arc<Mutex<CommandRunState>>>,
-    /// Holds the `Child` handle so the GUI can kill the process.
-    running_process: Option<RunningProcess>,
-    /// Cached document content for the Tasks tab.
+    
+    // Channels to/from worker
+    worker_tx: Option<std::sync::mpsc::Sender<GuiMessage>>,
+    worker_rx: Option<std::sync::mpsc::Receiver<WorkerMessage>>,
+
+    // Command running state
+    running_cmd_name: Option<String>,
+    running_cmd_log: Option<LogBuffer>,
+    running_cmd_status: Option<String>,
+    is_running: bool,
+
+    // Document state
     doc_cache: Option<DocCache>,
 }
 
 impl RustodianApp {
+    fn send(&self, msg: GuiMessage) {
+        if let Some(tx) = &self.worker_tx {
+            let _ = tx.send(msg);
+        }
+    }
+
     fn load_projects(&mut self) {
-        if let Some(store) = &self.store {
-            match store.list_projects() {
-                Ok(mut p) => {
-                    p.sort_by(|a, b| a.name.cmp(&b.name));
-                    self.projects = p;
-                }
-                Err(e) => {
-                    self.db_error = Some(format!("Failed to load projects: {e}"));
-                }
-            }
-        }
+        self.send(GuiMessage::LoadProjects);
     }
 
-    /// Kill the running process (if any) and clear the run state.
     fn kill_running_process(&mut self) {
-        if let Some(mut proc) = self.running_process.take() {
-            let _ = proc.child.kill();
-        }
+        self.send(GuiMessage::KillCommand);
     }
 
-    /// Spawn a command in a background thread and wire up output streaming.
     fn run_command(
         &mut self,
         command_name: &str,
         command_str: &str,
+        project_id: &rustodian_types::ProjectId,
         project_path: &std::path::Path,
-        ctx: &egui::Context,
     ) {
-        // Kill any previously running process first.
-        self.kill_running_process();
-
-        let state = Arc::new(Mutex::new(CommandRunState {
+        self.send(GuiMessage::RunCommand {
+            project_id: project_id.clone(),
+            project_path: project_path.to_path_buf(),
             command_name: command_name.to_string(),
-            output_log: String::new(),
-            running: true,
-            exit_status: None,
-        }));
-        self.run_state = Some(Arc::clone(&state));
-        let spec = CommandSpec {
-            program: command_str.to_string(),
-            args: vec![],
-            working_dir: project_path.to_path_buf(),
-            env: HashMap::new(),
-            use_shell: false,
-        };
+            command_str: command_str.to_string(),
+        });
+    }
 
-        let runner = DefaultCommandRunner;
-        let spawn_result = runner.spawn(spec);
-
-        let mut child = match spawn_result {
-            Ok(c) => c,
-            Err(e) => {
-                if let Ok(mut s) = state.lock() {
-                    s.output_log = format!("Failed to spawn process: {e}\n");
-                    s.running = false;
-                    s.exit_status = Some("spawn error".to_string());
+    fn ensure_doc_cache(&mut self, project: &Project) {
+        if let Some(cache) = &self.doc_cache {
+            if cache.project_path == project.path {
+                // If it's time to check for freshness
+                if cache.last_checked.elapsed() > Duration::from_secs(2) {
+                    if let Some((_, path)) = cache.available_docs.get(cache.selected_index) {
+                        if let Ok(meta) = std::fs::metadata(path) {
+                            if let Ok(modified) = meta.modified() {
+                                if Some(modified) != cache.last_modified {
+                                    self.reload_selected_doc();
+                                }
+                            }
+                        }
+                    }
+                    self.doc_cache.as_mut().unwrap().last_checked = Instant::now();
                 }
                 return;
             }
-        };
+        }
 
-        // Take ownership of the pipe handles before moving the child.
-        let stdout = child.stdout();
-        let stderr = child.stderr();
-
-        // Store the child handle so the GUI can kill it.
-        self.running_process = Some(RunningProcess { child });
-
-        // Clone what the background thread needs.
-        let ctx_clone = ctx.clone();
-
-        thread::spawn(move || {
-            // Spawn a secondary thread for stderr so we can read both streams
-            // concurrently without deadlocking.
-            let stderr_state = Arc::clone(&state);
-            let stderr_ctx = ctx_clone.clone();
-            let stderr_handle = stderr.map(|se| {
-                thread::spawn(move || {
-                    let reader = BufReader::new(se);
-                    for line in reader.lines() {
-                        match line {
-                            Ok(l) => {
-                                if let Ok(mut s) = stderr_state.lock() {
-                                    s.output_log.push_str(&l);
-                                    s.output_log.push('\n');
-                                }
-                                stderr_ctx.request_repaint();
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                })
-            });
-
-            // Read stdout on this thread.
-            if let Some(so) = stdout {
-                let reader = BufReader::new(so);
-                for line in reader.lines() {
-                    match line {
-                        Ok(l) => {
-                            if let Ok(mut s) = state.lock() {
-                                s.output_log.push_str(&l);
-                                s.output_log.push('\n');
-                            }
-                            ctx_clone.request_repaint();
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-
-            // Wait for stderr thread to finish.
-            if let Some(handle) = stderr_handle {
-                let _ = handle.join();
-            }
-
-            // Mark the process as finished. We cannot call child.wait() here
-            // because the Child is owned by RunningProcess on the main thread.
-            // Instead, we just mark running = false; the exit code is best-effort.
-            if let Ok(mut s) = state.lock() {
-                s.running = false;
-                if s.exit_status.is_none() {
-                    s.exit_status = Some("finished".to_string());
-                }
-            }
-            ctx_clone.request_repaint();
+        // We don't have the cache, so request discovery
+        self.doc_cache = None;
+        self.send(GuiMessage::DiscoverDocs {
+            project_path: project.path.clone(),
         });
+    }
+
+    fn reload_selected_doc(&mut self) {
+        if let Some(cache) = &mut self.doc_cache {
+            if let Some((_, path)) = cache.available_docs.get(cache.selected_index) {
+                self.send(GuiMessage::LoadDocContent { path: path.clone() });
+            }
+        }
+    }
+
+    fn process_messages(&mut self) {
+        let Some(rx) = &self.worker_rx else { return };
+        
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                WorkerMessage::ProjectsLoaded(Ok(mut p)) => {
+                    p.sort_by(|a, b| a.name.cmp(&b.name));
+                    self.projects = p;
+                    self.db_error = None;
+                }
+                WorkerMessage::ProjectsLoaded(Err(e)) => {
+                    self.db_error = Some(format!("Failed to load projects: {e}"));
+                }
+                WorkerMessage::CommandStatus { command_name, is_running, exit_status, log_buffer } => {
+                    self.running_cmd_name = Some(command_name);
+                    self.is_running = is_running;
+                    if exit_status.is_some() {
+                        self.running_cmd_status = exit_status;
+                    }
+                    self.running_cmd_log = Some(log_buffer);
+                }
+                WorkerMessage::DocsDiscovered { project_path, available_docs } => {
+                    if let Some(proj) = &self.selected_project {
+                        if proj.path == project_path {
+                            let mut cache = DocCache {
+                                project_path,
+                                available_docs,
+                                selected_index: 0,
+                                content: String::new(),
+                                parsed: ParsedMarkdown { blocks: vec![] },
+                                last_modified: None,
+                                last_checked: Instant::now(),
+                            };
+                            
+                            if let Some((_, path)) = cache.available_docs.first() {
+                                self.send(GuiMessage::LoadDocContent { path: path.clone() });
+                            }
+                            
+                            self.doc_cache = Some(cache);
+                        }
+                    }
+                }
+                WorkerMessage::DocLoaded { path: _, content, parsed, last_modified } => {
+                    if let Some(cache) = &mut self.doc_cache {
+                        cache.content = content;
+                        cache.parsed = parsed;
+                        cache.last_modified = last_modified;
+                        cache.last_checked = Instant::now();
+                    }
+                }
+            }
+        }
     }
 }
 
 impl eframe::App for RustodianApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.process_messages();
+
+        // Throttle repaints slightly to not hog CPU when streaming logs
+        if self.is_running {
+            ctx.request_repaint_after(Duration::from_millis(32));
+        }
+
         egui::SidePanel::left("projects_panel")
             .resizable(true)
             .min_width(200.0)
@@ -286,7 +250,7 @@ impl eframe::App for RustodianApp {
                             }
                         }
                     });
-                    // Apply project selection outside the immutable borrow of self.projects.
+                    
                     if let Some(idx) = clicked_index {
                         let proj = self.projects[idx].clone();
                         let switching = self
@@ -295,7 +259,10 @@ impl eframe::App for RustodianApp {
                             .is_none_or(|p| p.id != proj.id);
                         if switching {
                             self.kill_running_process();
-                            self.run_state = None;
+                            self.running_cmd_name = None;
+                            self.running_cmd_log = None;
+                            self.running_cmd_status = None;
+                            self.is_running = false;
                             self.doc_cache = None;
                         }
                         self.selected_project = Some(proj);
@@ -370,51 +337,21 @@ impl eframe::App for RustodianApp {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Runner / Logs tab rendering (extracted for clarity)
-// ---------------------------------------------------------------------------
-
 impl RustodianApp {
-    #[allow(clippy::too_many_lines)]
-    fn render_runner_logs(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        // Determine current state by peeking into the shared run_state.
-        let is_running = self
-            .run_state
-            .as_ref()
-            .and_then(|s| s.lock().ok().map(|g| g.running))
-            .unwrap_or(false);
-
-        if is_running {
-            // ---------------------------------------------------------------
-            // State B: A command is currently running.
-            // ---------------------------------------------------------------
-            let (cmd_name, log_snapshot) = self
-                .run_state
-                .as_ref()
-                .and_then(|s| {
-                    s.lock()
-                        .ok()
-                        .map(|g| (g.command_name.clone(), g.output_log.clone()))
-                })
-                .unwrap_or_default();
+    fn render_runner_logs(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+        if self.is_running {
+            let cmd_name = self.running_cmd_name.clone().unwrap_or_default();
+            let mut log_snapshot = self.running_cmd_log.as_ref().map(|l| l.snapshot()).unwrap_or_default();
 
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(format!("Running: {cmd_name}"));
                 if ui.button("⏹ Stop").clicked() {
                     self.kill_running_process();
-                    if let Some(state) = &self.run_state
-                        && let Ok(mut s) = state.lock()
-                    {
-                        s.running = false;
-                        s.exit_status = Some("killed by user".to_string());
-                        s.output_log.push_str("\n--- process killed ---\n");
-                    }
                 }
             });
             ui.separator();
 
-            // Live output area.
             egui::ScrollArea::vertical()
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
@@ -425,49 +362,43 @@ impl RustodianApp {
                     );
                 });
         } else {
-            // ---------------------------------------------------------------
-            // State A: No command running (or previous run finished).
-            // ---------------------------------------------------------------
-
-            // Show previous run output if available.
             let mut should_clear = false;
-            if let Some(state) = &self.run_state
-                && let Ok(guard) = state.lock()
-                && !guard.output_log.is_empty()
-            {
-                let status_label = guard.exit_status.as_deref().unwrap_or("unknown");
-
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "Last run: {} — {}",
-                        guard.command_name, status_label
-                    ));
-                    if ui.small_button("✕ Clear").clicked() {
-                        should_clear = true;
-                    }
-                });
-
-                let log_text = guard.output_log.clone();
-                drop(guard);
-
-                egui::ScrollArea::vertical()
-                    .max_height(250.0)
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut log_text.as_str())
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY),
-                        );
+            if let Some(log_buf) = &self.running_cmd_log {
+                let status_label = self.running_cmd_status.as_deref().unwrap_or("unknown");
+                let cmd_name = self.running_cmd_name.as_deref().unwrap_or("unknown");
+                
+                let count = log_buf.line_count();
+                if count > 0 || status_label != "unknown" {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Last run: {} — {}", cmd_name, status_label));
+                        if ui.small_button("✕ Clear").clicked() {
+                            should_clear = true;
+                        }
                     });
 
-                ui.separator();
+                    let mut log_text = log_buf.snapshot();
+
+                    egui::ScrollArea::vertical()
+                        .max_height(250.0)
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut log_text.as_str())
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+
+                    ui.separator();
+                }
             }
+            
             if should_clear {
-                self.run_state = None;
+                self.running_cmd_log = None;
+                self.running_cmd_name = None;
+                self.running_cmd_status = None;
             }
 
-            // Show the command table.
             let project = self.selected_project.clone();
             if let Some(project) = &project {
                 let commands = &project.metadata.commands;
@@ -483,7 +414,6 @@ impl RustodianApp {
                         .striped(true)
                         .spacing([12.0, 6.0])
                         .show(ui, |ui| {
-                            // Header row.
                             ui.strong("Name");
                             ui.strong("Source");
                             ui.strong("Command");
@@ -495,7 +425,7 @@ impl RustodianApp {
                                 ui.label(&cmd.source);
                                 ui.monospace(&cmd.command);
                                 if ui.button("▶ Run").clicked() {
-                                    self.run_command(&cmd.name, &cmd.command, &project.path, ctx);
+                                    self.run_command(&cmd.name, &cmd.command, &project.id, &project.path);
                                 }
                                 ui.end_row();
                             }
@@ -506,10 +436,6 @@ impl RustodianApp {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tasks / Documents tab rendering
-// ---------------------------------------------------------------------------
-
 impl RustodianApp {
     fn render_tasks_tab(&mut self, ui: &mut egui::Ui) {
         let Some(project) = self.selected_project.clone() else {
@@ -518,18 +444,11 @@ impl RustodianApp {
 
         self.ensure_doc_cache(&project);
 
-        if self
-            .doc_cache
-            .as_ref()
-            .is_none_or(|c| c.available_docs.is_empty())
-        {
-            ui.label(
-                "No documentation files (TODO.md, CHANGELOG.md, README.md) found in this project.",
-            );
+        if self.doc_cache.as_ref().is_none_or(|c| c.available_docs.is_empty()) {
+            ui.label("No documentation files (TODO.md, CHANGELOG.md, README.md) found in this project.");
             return;
         }
 
-        // Top bar: document selector tabs + refresh button.
         let mut needs_reload = false;
         ui.horizontal(|ui| {
             let cache = self.doc_cache.as_mut().unwrap();
@@ -555,198 +474,67 @@ impl RustodianApp {
             self.reload_selected_doc();
         }
 
-        // Render the document content in a scrollable area.
-        let content = match &self.doc_cache {
-            Some(c) => c.content.clone(),
+        let parsed = match &self.doc_cache {
+            Some(c) => c.parsed.clone(),
             None => return,
         };
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            render_markdown_lines(ui, &content);
-        });
-    }
-
-    /// Build or validate the document cache for the given project.
-    fn ensure_doc_cache(&mut self, project: &Project) {
-        if let Some(cache) = &self.doc_cache
-            && cache.project_path == project.path
-        {
-            return; // cache is still valid
-        }
-
-        let available_docs = discover_docs(&project.path);
-        let content = if available_docs.is_empty() {
-            String::new()
-        } else {
-            std::fs::read_to_string(&available_docs[0].1)
-                .unwrap_or_else(|e| format!("Error reading file: {e}"))
-        };
-
-        self.doc_cache = Some(DocCache {
-            project_path: project.path.clone(),
-            available_docs,
-            selected_index: 0,
-            content,
-        });
-    }
-
-    /// Reload the currently selected document from disk.
-    fn reload_selected_doc(&mut self) {
-        if let Some(cache) = &mut self.doc_cache
-            && let Some((_, path)) = cache.available_docs.get(cache.selected_index)
-        {
-            cache.content = std::fs::read_to_string(path)
-                .unwrap_or_else(|e| format!("Error reading file: {e}"));
-        }
-    }
-}
-
-/// Discover documentation files in the given project root directory.
-///
-/// Returns a list of `(display_name, absolute_path)` pairs. On
-/// case-insensitive file systems the first matching casing variant wins,
-/// preventing duplicates (e.g. both `TODO.md` and `todo.md` resolving to the
-/// same file).
-fn discover_docs(project_path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
-    let mut found = Vec::new();
-    let mut seen_lower = std::collections::HashSet::new();
-    for &name in DOC_CANDIDATES {
-        let lower = name.to_lowercase();
-        if seen_lower.contains(&lower) {
-            continue;
-        }
-        let full_path = project_path.join(name);
-        if full_path.is_file() {
-            seen_lower.insert(lower);
-            found.push((name.to_string(), full_path));
-        }
-    }
-    found
-}
-
-/// Lightweight line-by-line markdown renderer using native `egui` widgets.
-///
-/// Handles headers, task checkboxes, bullet/numbered lists, code blocks,
-/// horizontal rules, and plain text. Not a full `CommonMark` implementation –
-/// just enough to make project documentation readable at a glance.
-fn render_markdown_lines(ui: &mut egui::Ui, text: &str) {
-    let mut in_code_block = false;
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-
-        // ── Code fences ──────────────────────────────────────────────
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
-            continue;
-        }
-        if in_code_block {
-            ui.monospace(line);
-            continue;
-        }
-
-        // ── Blank lines ──────────────────────────────────────────────
-        if trimmed.is_empty() {
-            ui.add_space(4.0);
-            continue;
-        }
-
-        // ── Horizontal rules ─────────────────────────────────────────
-        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            ui.separator();
-            continue;
-        }
-
-        // ── Headers (#### → #) ───────────────────────────────────────
-        if let Some(rest) = trimmed.strip_prefix("#### ") {
-            ui.add_space(2.0);
-            ui.label(egui::RichText::new(rest).size(14.0).strong());
-            ui.add_space(2.0);
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("### ") {
-            ui.add_space(2.0);
-            ui.label(egui::RichText::new(rest).size(15.0).strong());
-            ui.add_space(2.0);
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("## ") {
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new(rest).size(18.0).strong());
-            ui.add_space(2.0);
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("# ") {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(rest).size(22.0).strong());
-            ui.add_space(4.0);
-            continue;
-        }
-
-        // ── Task checkboxes: - [x], - [X], - [ ] ────────────────────
-        if let Some(rest) = strip_task_prefix(trimmed, true) {
-            ui.horizontal(|ui| {
-                let mut checked = true;
-                ui.add_enabled(false, egui::Checkbox::without_text(&mut checked));
-                ui.label(rest);
-            });
-            continue;
-        }
-        if let Some(rest) = strip_task_prefix(trimmed, false) {
-            ui.horizontal(|ui| {
-                let mut checked = false;
-                ui.add_enabled(false, egui::Checkbox::without_text(&mut checked));
-                ui.label(rest);
-            });
-            continue;
-        }
-
-        // ── Bullet list items ────────────────────────────────────────
-        if let Some(rest) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            ui.horizontal(|ui| {
-                ui.label("  \u{2022}");
-                ui.label(rest);
-            });
-            continue;
-        }
-
-        // ── Numbered list items ──────────────────────────────────────
-        if let Some(dot_pos) = trimmed.find(". ") {
-            let prefix = &trimmed[..dot_pos];
-            if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
-                let number = &trimmed[..=dot_pos]; // e.g. "1."
-                let rest = &trimmed[dot_pos + 2..]; // text after ". "
-                ui.horizontal(|ui| {
-                    ui.label(format!("  {number}"));
-                    ui.label(rest);
-                });
-                continue;
+            for block in &parsed.blocks {
+                match block {
+                    MarkdownBlock::Header { level, text } => {
+                        let size = match level {
+                            1 => 22.0,
+                            2 => 18.0,
+                            3 => 15.0,
+                            _ => 14.0,
+                        };
+                        let top_space = match level {
+                            1 => 6.0,
+                            2 => 4.0,
+                            _ => 2.0,
+                        };
+                        let bot_space = match level {
+                            1 => 4.0,
+                            _ => 2.0,
+                        };
+                        ui.add_space(top_space);
+                        ui.label(egui::RichText::new(text).size(size).strong());
+                        ui.add_space(bot_space);
+                    }
+                    MarkdownBlock::CodeFence { text } => {
+                        ui.monospace(text);
+                    }
+                    MarkdownBlock::HorizontalRule => {
+                        ui.separator();
+                    }
+                    MarkdownBlock::Task { text, checked } => {
+                        ui.horizontal(|ui| {
+                            let mut c = *checked;
+                            ui.add_enabled(false, egui::Checkbox::without_text(&mut c));
+                            ui.label(text);
+                        });
+                    }
+                    MarkdownBlock::BulletList { text } => {
+                        ui.horizontal(|ui| {
+                            ui.label("  \u{2022}");
+                            ui.label(text);
+                        });
+                    }
+                    MarkdownBlock::NumberedList { number, text } => {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("  {number}"));
+                            ui.label(text);
+                        });
+                    }
+                    MarkdownBlock::Text { text } => {
+                        ui.label(text);
+                    }
+                    MarkdownBlock::BlankLine => {
+                        ui.add_space(4.0);
+                    }
+                }
             }
-        }
-
-        // ── Default: plain text ──────────────────────────────────────
-        ui.label(line);
+        });
     }
-}
-
-/// Try to strip a task checkbox prefix (`- [x] `, `- [X] `, `- [ ] `, or
-/// the `*` variants) from the beginning of a line.
-///
-/// `checked` selects whether to match the checked (`[x]`/`[X]`) or unchecked
-/// (`[ ]`) variant.
-fn strip_task_prefix(line: &str, checked: bool) -> Option<&str> {
-    let patterns: &[&str] = if checked {
-        &["- [x] ", "- [X] ", "* [x] ", "* [X] "]
-    } else {
-        &["- [ ] ", "* [ ] "]
-    };
-    for pat in patterns {
-        if let Some(rest) = line.strip_prefix(pat) {
-            return Some(rest);
-        }
-    }
-    None
 }

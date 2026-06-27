@@ -88,6 +88,24 @@ pub fn run_migrations(conn: &Connection) -> Result<(), StorageError> {
         .map_err(StorageError::Sqlite)?;
     }
 
+    let applied_003: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM _migrations WHERE id = 3",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::Sqlite)?;
+    if !applied_003 {
+        info!("Applying migration 003: project logs");
+        conn.execute_batch(MIGRATION_003)
+            .map_err(StorageError::Sqlite)?;
+        conn.execute(
+            "INSERT INTO _migrations (id, name) VALUES (3, 'project_logs')",
+            [],
+        )
+        .map_err(StorageError::Sqlite)?;
+    }
+
     info!("Migrations complete");
     Ok(())
 }
@@ -96,4 +114,17 @@ CREATE TABLE IF NOT EXISTS remote_projects (
     repo_slug         TEXT PRIMARY KEY,
     preserve_patterns TEXT NOT NULL DEFAULT '[]'
 );
+";
+
+const MIGRATION_003: &str = r"
+CREATE TABLE IF NOT EXISTS project_logs (
+    id           TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL,
+    command_name TEXT NOT NULL,
+    exit_code    INTEGER,
+    log_text     TEXT NOT NULL DEFAULT '',
+    run_at       TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_logs_project ON project_logs(project_id, run_at DESC);
 ";
