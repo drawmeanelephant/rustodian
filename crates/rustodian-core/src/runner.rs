@@ -12,7 +12,7 @@ pub struct CommandSpec {
 }
 
 #[cfg(unix)]
-use nix::sys::signal::{Signal, kill};
+use nix::sys::signal::{kill, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
 use std::io::Read;
@@ -100,14 +100,14 @@ impl RunningProcess for DefaultRunningProcess {
 
             // Reap the zombie
             let _ = self.child.wait();
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(unix))]
         {
             let _ = self.child.kill();
             let _ = self.child.wait();
-            return Ok(());
+            Ok(())
         }
     }
 
