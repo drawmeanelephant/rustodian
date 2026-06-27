@@ -12,7 +12,7 @@ pub struct CommandSpec {
 }
 
 #[cfg(unix)]
-use nix::sys::signal::{kill, Signal};
+use nix::sys::signal::{Signal, kill};
 #[cfg(unix)]
 use nix::unistd::Pid;
 use std::io::Read;
