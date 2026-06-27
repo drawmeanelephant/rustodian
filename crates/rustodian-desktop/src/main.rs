@@ -3,8 +3,8 @@ use eframe::egui;
 use rustodian_core::traits::ProjectStore;
 use rustodian_storage::SqliteStore;
 use rustodian_types::Project;
-use std::io::{BufRead, BufReader};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 
 use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
 use rustodian_core::traits::CommandRunner;

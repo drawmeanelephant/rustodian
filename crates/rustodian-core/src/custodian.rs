@@ -4,16 +4,16 @@
 //! Uses `Box<dyn Trait>` for simplicity — dynamic dispatch overhead is
 //! irrelevant when every call hits the filesystem or database.
 
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 use tracing::{info, instrument};
 
 use rustodian_types::{Project, ProjectId, ScanConfig, ScanId, ScanRecord};
 
 use crate::error::CoreError;
-use crate::traits::{GitInspector, ProjectScanner, ProjectStore, CommandRunner};
 use crate::runner::CommandSpec;
+use crate::traits::{CommandRunner, GitInspector, ProjectScanner, ProjectStore};
 
 /// Report from a scan operation.
 #[derive(Debug)]

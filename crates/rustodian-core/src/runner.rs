@@ -11,11 +11,14 @@ pub struct CommandSpec {
     pub use_shell: bool,
 }
 
-use std::process::{Child, Command, Stdio};
-use std::os::unix::process::CommandExt;
-use std::io::Read;
-use nix::sys::signal::{kill, Signal};
+#[cfg(unix)]
+use nix::sys::signal::{Signal, kill};
+#[cfg(unix)]
 use nix::unistd::Pid;
+use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Command, Stdio};
 
 use crate::error::CoreError;
 use crate::traits::{CommandRunner, RunningProcess};
@@ -31,7 +34,8 @@ impl CommandRunner for DefaultCommandRunner {
         } else {
             // If the user specifies `use_shell=false`, but `spec.program` is actually a full command string,
             // we should parse it with shlex.
-            let mut args_iter = shlex::split(&spec.program).unwrap_or_else(|| vec![spec.program.clone()]);
+            let mut args_iter =
+                shlex::split(&spec.program).unwrap_or_else(|| vec![spec.program.clone()]);
 
             let program = if args_iter.is_empty() {
                 spec.program.clone()
@@ -48,10 +52,14 @@ impl CommandRunner for DefaultCommandRunner {
         cmd.current_dir(&spec.working_dir)
             .envs(&spec.env)
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .process_group(0); // Create a new process group
+            .stderr(Stdio::inherit());
 
-        let child = cmd.spawn().map_err(|e| CoreError::Storage(format!("Failed to spawn process: {e}")))?;
+        #[cfg(unix)]
+        cmd.process_group(0); // Create a new process group
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| CoreError::Storage(format!("Failed to spawn process: {e}")))?;
 
         Ok(Box::new(DefaultRunningProcess { child }))
     }
@@ -67,7 +75,9 @@ impl RunningProcess for DefaultRunningProcess {
     }
 
     fn wait(&mut self) -> Result<(), CoreError> {
-        self.child.wait().map_err(|e| CoreError::Storage(format!("Failed to wait for process: {e}")))?;
+        self.child
+            .wait()
+            .map_err(|e| CoreError::Storage(format!("Failed to wait for process: {e}")))?;
         Ok(())
     }
 
@@ -75,25 +85,43 @@ impl RunningProcess for DefaultRunningProcess {
         match self.child.try_wait() {
             Ok(Some(_)) => Ok(Some(())),
             Ok(None) => Ok(None),
-            Err(e) => Err(CoreError::Storage(format!("Failed to try_wait for process: {e}"))),
+            Err(e) => Err(CoreError::Storage(format!(
+                "Failed to try_wait for process: {e}"
+            ))),
         }
     }
 
     fn kill(&mut self) -> Result<(), CoreError> {
-        let pid = Pid::from_raw(self.child.id().cast_signed());
-        // Kill the entire process group
-        let _ = kill(Pid::from_raw(-pid.as_raw()), Signal::SIGKILL);
+        #[cfg(unix)]
+        {
+            let pid = Pid::from_raw(self.child.id().cast_signed());
+            // Kill the entire process group
+            let _ = kill(Pid::from_raw(-pid.as_raw()), Signal::SIGKILL);
 
-        // Reap the zombie
-        let _ = self.child.wait();
-        Ok(())
+            // Reap the zombie
+            let _ = self.child.wait();
+            return Ok(());
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            return Ok(());
+        }
     }
 
     fn stdout(&mut self) -> Option<Box<dyn Read + Send + Sync>> {
-        self.child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send + Sync>)
+        self.child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send + Sync>)
     }
 
     fn stderr(&mut self) -> Option<Box<dyn Read + Send + Sync>> {
-        self.child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send + Sync>)
+        self.child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send + Sync>)
     }
 }
