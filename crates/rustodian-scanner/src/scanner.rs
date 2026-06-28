@@ -140,5 +140,78 @@ impl ProjectScanner for FsScanner {
 
 #[cfg(test)]
 mod tests {
-    // Future: tests with tempdir fixtures containing marker files
+    use super::*;
+    use std::fs::{self, File};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_scanner_basic_and_exclusions() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create project A (Rust project)
+        let proj_a = root.join("project_a");
+        fs::create_dir_all(&proj_a).unwrap();
+        File::create(proj_a.join("Cargo.toml")).unwrap();
+
+        // Create project B (Python project)
+        let proj_b = root.join("project_b");
+        fs::create_dir_all(&proj_b).unwrap();
+        File::create(proj_b.join("requirements.txt")).unwrap();
+
+        // Create excluded folder
+        let excl_dir = root.join("excluded_folder");
+        fs::create_dir_all(&excl_dir).unwrap();
+        File::create(excl_dir.join("Cargo.toml")).unwrap();
+
+        let scanner = FsScanner;
+
+        // Scan without exclusions
+        let config_no_excl = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config_no_excl).unwrap();
+        assert_eq!(projs.len(), 3);
+
+        // Scan with exclusions
+        let config_excl = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec!["**/excluded_folder".to_string()],
+        };
+        let projs_excl = scanner.scan(root, &config_excl).unwrap();
+        assert_eq!(projs_excl.len(), 2);
+        assert_eq!(projs_excl[0].name, "project_a");
+        assert_eq!(projs_excl[1].name, "project_b");
+    }
+
+    #[test]
+    fn test_scanner_nested_skipping() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create parent project (Rust project)
+        let parent_proj = root.join("parent_proj");
+        fs::create_dir_all(&parent_proj).unwrap();
+        File::create(parent_proj.join("Cargo.toml")).unwrap();
+
+        // Create nested project inside parent (Node project)
+        let nested_proj = parent_proj.join("nested_node_proj");
+        fs::create_dir_all(&nested_proj).unwrap();
+        File::create(nested_proj.join("package.json")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 5,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+        
+        // It should only find "parent_proj" and skip descending into "nested_node_proj"
+        assert_eq!(projs.len(), 1);
+        assert_eq!(projs[0].name, "parent_proj");
+    }
 }

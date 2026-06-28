@@ -12,12 +12,14 @@
 //! - [`custodian`] — The orchestrator that wires everything together
 //! - [`error`] — Domain error types
 
+pub mod bootstrapper;
 pub mod custodian;
 pub mod error;
 pub mod log_buffer;
 pub mod runner;
 pub mod traits;
 
+pub use bootstrapper::ProjectBootstrapper;
 pub use custodian::Custodian;
 pub use error::CoreError;
 pub use log_buffer::LogBuffer;

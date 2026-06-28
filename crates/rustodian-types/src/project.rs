@@ -76,3 +76,14 @@ pub struct RemoteProject {
     pub repo_slug: String,
     pub preserve_patterns: Vec<String>,
 }
+
+/// A persisted record of a command execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectLog {
+    pub id: String,
+    pub project_id: String,
+    pub command_name: String,
+    pub exit_code: Option<i32>,
+    pub log_text: String,
+    pub run_at: DateTime<Utc>,
+}

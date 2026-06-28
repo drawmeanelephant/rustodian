@@ -105,16 +105,16 @@ impl RunningProcess for DefaultRunningProcess {
         self.child.id()
     }
 
-    fn wait(&mut self) -> Result<(), CoreError> {
-        self.child
+    fn wait(&mut self) -> Result<Option<i32>, CoreError> {
+        let status = self.child
             .wait()
             .map_err(|e| CoreError::Storage(format!("Failed to wait for process: {e}")))?;
-        Ok(())
+        Ok(status.code())
     }
 
-    fn try_wait(&mut self) -> Result<Option<()>, CoreError> {
+    fn try_wait(&mut self) -> Result<Option<Option<i32>>, CoreError> {
         match self.child.try_wait() {
-            Ok(Some(_)) => Ok(Some(())),
+            Ok(Some(status)) => Ok(Some(status.code())),
             Ok(None) => Ok(None),
             Err(e) => Err(CoreError::Storage(format!(
                 "Failed to try_wait for process: {e}"

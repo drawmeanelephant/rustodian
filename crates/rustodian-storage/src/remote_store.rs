@@ -6,10 +6,7 @@ use rustodian_types::RemoteProject;
 
 impl RemoteProjectStore for SqliteStore {
     fn save_remote_project(&self, project: &RemoteProject) -> Result<(), CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
         let patterns_json = serde_json::to_string(&project.preserve_patterns)
             .map_err(|e| CoreError::Storage(format!("failed to serialize patterns: {e}")))?;
         conn.execute(
@@ -22,10 +19,7 @@ impl RemoteProjectStore for SqliteStore {
         Ok(())
     }
     fn list_remote_projects(&self) -> Result<Vec<RemoteProject>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare("SELECT repo_slug, preserve_patterns FROM remote_projects")
             .map_err(|e| CoreError::Storage(e.to_string()))?;
@@ -33,7 +27,12 @@ impl RemoteProjectStore for SqliteStore {
             .query_map([], |row| {
                 let repo_slug: String = row.get(0)?;
                 let patterns_json: String = row.get(1)?;
-                let preserve_patterns = serde_json::from_str(&patterns_json).unwrap_or_default();
+                let preserve_patterns = serde_json::from_str(&patterns_json)
+                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e)
+                    ))?;
                 Ok(RemoteProject {
                     repo_slug,
                     preserve_patterns,
@@ -47,10 +46,7 @@ impl RemoteProjectStore for SqliteStore {
         Ok(projects)
     }
     fn delete_remote_project(&self, repo_slug: &str) -> Result<bool, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
         let changes = conn
             .execute(
                 "DELETE FROM remote_projects WHERE repo_slug = ?1",

@@ -1,30 +1,17 @@
 //! Persistence for command execution logs.
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use rusqlite::{OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 
 use crate::store::SqliteStore;
 use rustodian_core::CoreError;
 
-/// A persisted record of a command execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectLog {
-    pub id: String,
-    pub project_id: String,
-    pub command_name: String,
-    pub exit_code: Option<i32>,
-    pub log_text: String,
-    pub run_at: DateTime<Utc>,
-}
+pub use rustodian_types::ProjectLog;
 
 impl SqliteStore {
     /// Persist a command execution log.
     pub fn save_log(&self, log: &ProjectLog) -> Result<(), CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         conn.execute(
             "INSERT INTO project_logs (id, project_id, command_name, exit_code, log_text, run_at)
@@ -48,10 +35,7 @@ impl SqliteStore {
 
     /// List execution logs for a project, ordered by most recent first.
     pub fn list_logs(&self, project_id: &str, limit: usize) -> Result<Vec<ProjectLog>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn
             .prepare(
@@ -103,10 +87,7 @@ impl SqliteStore {
 
     /// Get a specific log entry by ID.
     pub fn get_log(&self, id: &str) -> Result<Option<ProjectLog>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn
             .prepare(
@@ -158,10 +139,7 @@ impl SqliteStore {
 
     /// Get the most recent log entry for a project.
     pub fn get_latest_log(&self, project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn
             .prepare(

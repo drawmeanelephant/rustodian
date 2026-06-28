@@ -1,11 +1,6 @@
-//! Core trait definitions — the contracts of Rustodian.
-//!
-//! Infrastructure crates implement these traits.
-//! The [`Custodian`](crate::custodian::Custodian) orchestrator consumes them via `Box<dyn Trait>`.
-
 use std::path::Path;
 
-use rustodian_types::{Project, ProjectId, ScanConfig, ScanId, ScanRecord, VcsInfo};
+use rustodian_types::{Project, ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord, VcsInfo};
 
 use crate::error::CoreError;
 
@@ -42,6 +37,18 @@ pub trait ProjectStore: Send + Sync {
 
     /// Get the most recent scan record.
     fn get_latest_scan(&self) -> Result<Option<ScanRecord>, CoreError>;
+
+    /// Persist a command execution log.
+    fn save_log(&self, log: &ProjectLog) -> Result<(), CoreError>;
+
+    /// List execution logs for a project, ordered by most recent first.
+    fn list_logs(&self, project_id: &str, limit: usize) -> Result<Vec<ProjectLog>, CoreError>;
+
+    /// Get a specific log entry by ID.
+    fn get_log(&self, id: &str) -> Result<Option<ProjectLog>, CoreError>;
+
+    /// Get the most recent log entry for a project.
+    fn get_latest_log(&self, project_id: &str) -> Result<Option<ProjectLog>, CoreError>;
 }
 
 /// Contract for filesystem project discovery.
@@ -82,8 +89,8 @@ use crate::runner::CommandSpec;
 
 pub trait RunningProcess: Send + Sync {
     fn id(&self) -> u32;
-    fn wait(&mut self) -> Result<(), CoreError>;
-    fn try_wait(&mut self) -> Result<Option<()>, CoreError>;
+    fn wait(&mut self) -> Result<Option<i32>, CoreError>;
+    fn try_wait(&mut self) -> Result<Option<Option<i32>>, CoreError>;
     fn kill(&mut self) -> Result<(), CoreError>;
     fn stdout(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>>;
     fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>>;

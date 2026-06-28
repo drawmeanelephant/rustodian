@@ -1,62 +1,71 @@
 //! `SQLite` implementation of [`ProjectStore`].
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 use tracing::debug;
+
+use r2d2_sqlite::SqliteConnectionManager;
 
 use rustodian_core::CoreError;
 use rustodian_core::traits::ProjectStore;
-use rustodian_types::{Project, ProjectId, ProjectMetadata, ScanId, ScanRecord, ScanStatus};
+use rustodian_types::{Project, ProjectId, ProjectLog, ProjectMetadata, ScanId, ScanRecord, ScanStatus};
 
 use crate::error::StorageError;
 use crate::migrations;
 
 /// `SQLite`-backed project store.
 ///
-/// Wraps `Connection` in a `Mutex` to satisfy `Send + Sync` on `ProjectStore`.
-/// For a single-threaded CLI tool this adds no overhead — there's no contention.
+/// Uses an `r2d2` connection pool to allow concurrent reads/writes and prevent lock contention.
 #[derive(Clone)]
 pub struct SqliteStore {
-    pub(crate) conn: std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
+    pub(crate) pool: std::sync::Arc<r2d2::Pool<SqliteConnectionManager>>,
 }
 
 impl SqliteStore {
     /// Open or create a database at the given path.
     pub fn open(path: &Path) -> Result<Self, StorageError> {
-        debug!(path = %path.display(), "Opening database");
-        let conn = Connection::open(path).map_err(StorageError::Sqlite)?;
-
-        // Enable WAL mode for better concurrent read performance
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(StorageError::Sqlite)?;
-        // Enable foreign key enforcement
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(StorageError::Sqlite)?;
+        debug!(path = %path.display(), "Opening database pool");
+        let manager = SqliteConnectionManager::file(path)
+            .with_init(|c| {
+                c.execute_batch("
+                    PRAGMA journal_mode = WAL;
+                    PRAGMA foreign_keys = ON;
+                ")
+            });
+        let pool = r2d2::Pool::new(manager)
+            .map_err(|e| StorageError::Migration(format!("failed to create database pool: {e}")))?;
 
         Ok(Self {
-            conn: std::sync::Arc::new(Mutex::new(conn)),
+            pool: std::sync::Arc::new(pool),
         })
     }
 
     /// Create an in-memory database (for testing).
     pub fn open_in_memory() -> Result<Self, StorageError> {
-        debug!("Opening in-memory database");
-        let conn = Connection::open_in_memory().map_err(StorageError::Sqlite)?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(StorageError::Sqlite)?;
+        debug!("Opening in-memory database pool");
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let db_url = format!("file:{}?mode=memory&cache=shared", uuid);
+        let manager = SqliteConnectionManager::file(&db_url)
+            .with_init(|c| {
+                c.execute_batch("
+                    PRAGMA journal_mode = WAL;
+                    PRAGMA foreign_keys = ON;
+                ")
+            });
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| StorageError::Migration(format!("failed to create in-memory pool: {e}")))?;
+
         Ok(Self {
-            conn: std::sync::Arc::new(Mutex::new(conn)),
+            pool: std::sync::Arc::new(pool),
         })
     }
 
     /// Run all pending database migrations.
     pub fn migrate(&self) -> Result<(), StorageError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| StorageError::Migration(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn().map_err(|e| StorageError::Migration(e.to_string()))?;
         migrations::run_migrations(&conn)
     }
 
@@ -72,6 +81,13 @@ impl SqliteStore {
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| CoreError::Internal(format!("failed to create data dir: {e}")))?;
         Ok(data_dir.join("rustodian.db"))
+    }
+
+    /// Get a pooled connection from the pool.
+    pub(crate) fn get_conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, CoreError> {
+        self.pool
+            .get()
+            .map_err(|e| CoreError::Storage(format!("failed to get database connection: {e}")))
     }
 }
 
@@ -113,29 +129,23 @@ fn parse_project_row(
         })
         .transpose()?;
 
-    let meta_json: serde_json::Value =
-        serde_json::from_str(meta_str).unwrap_or(serde_json::json!({}));
-    let metadata: ProjectMetadata = serde_json::from_value(
-        meta_json
-            .get("meta")
-            .cloned()
-            .unwrap_or(serde_json::json!({})),
-    )
-    .unwrap_or_default();
-    let vcs = serde_json::from_value(
-        meta_json
-            .get("vcs")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null),
-    )
-    .unwrap_or(None);
-    let languages = serde_json::from_value(
-        meta_json
-            .get("languages")
-            .cloned()
-            .unwrap_or(serde_json::json!([])),
-    )
-    .unwrap_or_default();
+    let meta_json: serde_json::Value = serde_json::from_str(meta_str)
+        .map_err(|e| CoreError::Storage(format!("invalid metadata JSON for project '{name}': {e}")))?;
+
+    let meta_val = meta_json.get("meta")
+        .ok_or_else(|| CoreError::Storage(format!("metadata JSON for project '{name}' missing 'meta' field")))?;
+    let metadata: ProjectMetadata = serde_json::from_value(meta_val.clone())
+        .map_err(|e| CoreError::Storage(format!("failed to deserialize ProjectMetadata for project '{name}': {e}")))?;
+
+    let vcs_val = meta_json.get("vcs")
+        .ok_or_else(|| CoreError::Storage(format!("metadata JSON for project '{name}' missing 'vcs' field")))?;
+    let vcs = serde_json::from_value(vcs_val.clone())
+        .map_err(|e| CoreError::Storage(format!("failed to deserialize VCS metadata for project '{name}': {e}")))?;
+
+    let lang_val = meta_json.get("languages")
+        .ok_or_else(|| CoreError::Storage(format!("metadata JSON for project '{name}' missing 'languages' field")))?;
+    let languages = serde_json::from_value(lang_val.clone())
+        .map_err(|e| CoreError::Storage(format!("failed to deserialize languages metadata for project '{name}': {e}")))?;
 
     Ok(Project {
         id,
@@ -151,10 +161,7 @@ fn parse_project_row(
 
 impl ProjectStore for SqliteStore {
     fn save_project(&self, project: &Project) -> Result<ProjectId, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         conn.execute(
             "INSERT INTO projects (id, name, path, discovered_at, last_scanned_at, metadata_json)
@@ -198,10 +205,7 @@ impl ProjectStore for SqliteStore {
     }
 
     fn get_project(&self, id: &ProjectId) -> Result<Option<Project>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn.prepare("SELECT id, name, path, discovered_at, last_scanned_at, metadata_json FROM projects WHERE id = ?1")
             .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
@@ -230,10 +234,7 @@ impl ProjectStore for SqliteStore {
     }
 
     fn list_projects(&self) -> Result<Vec<Project>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn.prepare("SELECT id, name, path, discovered_at, last_scanned_at, metadata_json FROM projects")
             .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
@@ -277,10 +278,7 @@ impl ProjectStore for SqliteStore {
     }
 
     fn delete_project(&self, id: &ProjectId) -> Result<bool, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
         let count = conn
             .execute(
                 "DELETE FROM projects WHERE id = ?1",
@@ -291,10 +289,7 @@ impl ProjectStore for SqliteStore {
     }
 
     fn find_by_path(&self, path: &Path) -> Result<Option<Project>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn.prepare("SELECT id, name, path, discovered_at, last_scanned_at, metadata_json FROM projects WHERE path = ?1")
             .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
@@ -322,10 +317,7 @@ impl ProjectStore for SqliteStore {
     }
 
     fn save_scan(&self, scan: &ScanRecord) -> Result<ScanId, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         conn.execute(
             "INSERT INTO scans (id, root_path, started_at, completed_at, projects_found, status)
@@ -349,10 +341,7 @@ impl ProjectStore for SqliteStore {
     }
 
     fn get_latest_scan(&self) -> Result<Option<ScanRecord>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| CoreError::Storage(format!("lock poisoned: {e}")))?;
+        let conn = self.get_conn()?;
 
         let mut stmt = conn.prepare("SELECT id, root_path, started_at, completed_at, projects_found, status FROM scans ORDER BY started_at DESC LIMIT 1")
             .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
@@ -389,7 +378,8 @@ impl ProjectStore for SqliteStore {
             let status = match status_str.as_str() {
                 "running" => ScanStatus::Running,
                 "completed" => ScanStatus::Completed,
-                _ => ScanStatus::Failed,
+                "failed" => ScanStatus::Failed,
+                other => return Err(CoreError::Storage(format!("invalid scan status '{other}'"))),
             };
 
             Ok(Some(ScanRecord {
@@ -403,6 +393,22 @@ impl ProjectStore for SqliteStore {
         } else {
             Ok(None)
         }
+    }
+
+    fn save_log(&self, log: &ProjectLog) -> Result<(), CoreError> {
+        SqliteStore::save_log(self, log)
+    }
+
+    fn list_logs(&self, project_id: &str, limit: usize) -> Result<Vec<ProjectLog>, CoreError> {
+        SqliteStore::list_logs(self, project_id, limit)
+    }
+
+    fn get_log(&self, id: &str) -> Result<Option<ProjectLog>, CoreError> {
+        SqliteStore::get_log(self, id)
+    }
+
+    fn get_latest_log(&self, project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
+        SqliteStore::get_latest_log(self, project_id)
     }
 }
 

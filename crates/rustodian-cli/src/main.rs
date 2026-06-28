@@ -170,7 +170,7 @@ fn main() -> Result<()> {
                 preserve,
             } => commands::remote::execute_add(&store, &repo_slug, &preserve),
             RemoteCommands::List => commands::remote::execute_list(&store, &cli.format),
-            RemoteCommands::Refresh { dest } => commands::remote::execute_refresh(&store, &dest),
+            RemoteCommands::Refresh { dest } => commands::remote::execute_refresh(&custodian, &store, &dest),
         },
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
         Commands::Run { project, command } => {

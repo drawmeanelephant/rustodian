@@ -1,9 +1,10 @@
 use crate::OutputFormat;
 use anyhow::{Context, Result};
+use rustodian_core::Custodian;
 use rustodian_core::traits::{RemoteDownloader, RemoteProjectStore};
 use rustodian_remote::GithubDownloader;
 use rustodian_storage::SqliteStore;
-use rustodian_types::RemoteProject;
+use rustodian_types::{RemoteProject, ScanConfig};
 use tokio::runtime::Runtime;
 use tracing::info;
 
@@ -49,7 +50,11 @@ pub fn execute_list(store: &SqliteStore, format: &OutputFormat) -> Result<()> {
     Ok(())
 }
 
-pub fn execute_refresh(store: &SqliteStore, dest_dir: &std::path::Path) -> Result<()> {
+pub fn execute_refresh(
+    custodian: &Custodian,
+    store: &SqliteStore,
+    dest_dir: &std::path::Path,
+) -> Result<()> {
     let projects = store
         .list_remote_projects()
         .context("failed to list remote projects")?;
@@ -59,17 +64,51 @@ pub fn execute_refresh(store: &SqliteStore, dest_dir: &std::path::Path) -> Resul
     }
     let downloader = GithubDownloader::new();
     let rt = Runtime::new().context("failed to create tokio runtime")?;
-    rt.block_on(async {
-        for project in projects {
-            println!("Refreshing {}...", project.repo_slug);
-            match downloader
-                .download_and_extract(&project, dest_dir, &project.preserve_patterns)
+    
+    for project in projects {
+        println!("Refreshing {}...", project.repo_slug);
+        let project_dest = dest_dir.join(&project.repo_slug);
+        let download_res = rt.block_on(async {
+            downloader
+                .download_and_extract(&project, &project_dest, &project.preserve_patterns)
                 .await
-            {
-                Ok(()) => println!("Successfully refreshed {}", project.repo_slug),
-                Err(e) => println!("Failed to refresh {}: {}", project.repo_slug, e),
+        });
+
+        match download_res {
+            Ok(()) => {
+                println!("Successfully refreshed {}", project.repo_slug);
+                println!("Scanning project {}...", project.repo_slug);
+                let scan_config = ScanConfig {
+                    max_depth: 3,
+                    follow_symlinks: false,
+                    exclude_patterns: vec![],
+                };
+                match custodian.scan(&project_dest, &scan_config) {
+                    Ok(report) => {
+                        println!("Scan completed. Found {} projects.", report.projects_found);
+                        match custodian.find_by_path(&project_dest) {
+                            Ok(Some(proj)) => {
+                                println!("Bootstrapping and verifying project {}...", proj.name);
+                                match custodian.bootstrap_and_verify(&proj.id) {
+                                    Ok(()) => println!("Successfully bootstrapped and verified {}!", proj.name),
+                                    Err(e) => println!("Failed to bootstrap and verify {}: {}", proj.name, e),
+                                }
+                            }
+                            Ok(None) => {
+                                println!("Could not find the project in database by path: {}", project_dest.display());
+                            }
+                            Err(e) => {
+                                println!("Failed to query project by path: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("Failed to scan project {}: {}", project.repo_slug, e);
+                    }
+                }
             }
+            Err(e) => println!("Failed to refresh {}: {}", project.repo_slug, e),
         }
-    });
+    }
     Ok(())
 }

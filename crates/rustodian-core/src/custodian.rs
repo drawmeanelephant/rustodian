@@ -9,7 +9,7 @@ use std::path::Path;
 
 use tracing::{info, instrument};
 
-use rustodian_types::{Project, ProjectId, ScanConfig, ScanId, ScanRecord};
+use rustodian_types::{Project, ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord};
 
 use crate::error::CoreError;
 use crate::runner::CommandSpec;
@@ -142,19 +142,88 @@ impl Custodian {
                 ))
             })?;
 
+        self.run_and_log_command(&project, command_name, &cmd.command, cmd.use_shell, HashMap::new())?;
+        Ok(())
+    }
+
+    /// Runs a command for a project, streams output in real-time, and logs it to the database.
+    pub fn run_and_log_command(
+        &self,
+        project: &Project,
+        command_name: &str,
+        program: &str,
+        use_shell: bool,
+        env: HashMap<String, String>,
+    ) -> Result<Option<i32>, CoreError> {
         let spec = CommandSpec {
-            program: cmd.command.clone(),
+            program: program.to_string(),
             args: vec![],
             working_dir: project.path.clone(),
-            env: HashMap::new(),
-            use_shell: false,
-            capture_output: false,
+            env,
+            use_shell,
+            capture_output: true,
         };
 
         let mut child = self.runner.spawn(spec)?;
-        child.wait()?;
 
-        Ok(())
+        let log_buffer = crate::log_buffer::LogBuffer::new();
+
+        let stdout_log = log_buffer.clone();
+        let mut stdout_handle = None;
+        if let Some(so) = child.stdout() {
+            stdout_handle = Some(std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(so);
+                for line in reader.lines().map_while(Result::ok) {
+                    println!("{line}");
+                    stdout_log.push_line(line);
+                }
+            }));
+        }
+
+        let stderr_log = log_buffer.clone();
+        let mut stderr_handle = None;
+        if let Some(se) = child.stderr() {
+            stderr_handle = Some(std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(se);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("{line}");
+                    stderr_log.push_line(line);
+                }
+            }));
+        }
+
+        let exit_code = child.wait()?;
+
+        if let Some(h) = stdout_handle {
+            let _ = h.join();
+        }
+        if let Some(h) = stderr_handle {
+            let _ = h.join();
+        }
+
+        let full_log = log_buffer.snapshot();
+
+        let log_record = ProjectLog {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: project.id.to_string(),
+            command_name: command_name.to_string(),
+            exit_code,
+            log_text: full_log,
+            run_at: chrono::Utc::now(),
+        };
+
+        self.store.save_log(&log_record)?;
+
+        Ok(exit_code)
+    }
+
+    /// Automatically bootstrap (environment setup/isolation) and verify (run test suite) a project.
+    pub fn bootstrap_and_verify(&self, project_id: &ProjectId) -> Result<(), CoreError> {
+        let project = self.info(project_id)?;
+        let bootstrapper = crate::bootstrapper::ProjectBootstrapper::new(self);
+        bootstrapper.bootstrap_and_verify(&project)
     }
 
     /// List all tracked projects.
@@ -212,6 +281,12 @@ impl Custodian {
             return Ok(Some(p.clone()));
         }
         Ok(None)
+    }
+
+    /// Find a project by its filesystem path.
+    #[instrument(skip(self))]
+    pub fn find_by_path(&self, path: &Path) -> Result<Option<Project>, CoreError> {
+        self.store.find_by_path(path)
     }
 }
 

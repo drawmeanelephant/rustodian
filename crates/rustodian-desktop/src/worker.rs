@@ -291,9 +291,9 @@ pub fn run_worker(
 
                             process_exited_clone.store(true, std::sync::atomic::Ordering::SeqCst);
                             let mut proc = process_arc.lock().unwrap();
-                            let _ = proc.wait();
+                            let exit_status = proc.wait().ok().flatten();
 
-                            let mut exit_code = None;
+                            let mut exit_code = exit_status;
                             let killed = *should_kill_clone.lock().unwrap();
 
                             if killed {
