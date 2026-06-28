@@ -18,8 +18,6 @@ impl CommandDiscoverer {
 
         let mut commands = Vec::new();
 
-
-
         // 1. Rustodian config (.rustodian.toml)
         let toml_content = fs::read_to_string(root.join(".rustodian.toml"));
         let toml_config = toml_content
