@@ -269,7 +269,7 @@ impl ProjectStore for SqliteStore {
             ) {
                 Ok(proj) => projects.push(proj),
                 Err(e) => {
-                    tracing::warn!("Skipping invalid project data for path '{path_str}': {e}")
+                    tracing::warn!("Skipping invalid project data for path '{path_str}': {e}");
                 }
             }
         }
