@@ -362,10 +362,10 @@ pub fn run_worker(
             }
             GuiMessage::CheckDocFreshness { path, known_mtime } => {
                 let current_mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
-                if known_mtime != current_mtime {
-                    let _ = tx.send(WorkerMessage::DocStale { path });
-                } else {
+                if known_mtime == current_mtime {
                     let _ = tx.send(WorkerMessage::DocFresh { path });
+                } else {
+                    let _ = tx.send(WorkerMessage::DocStale { path });
                 }
                 ctx.request_repaint();
             }

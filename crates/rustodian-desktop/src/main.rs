@@ -67,7 +67,6 @@ enum Tab {
 }
 
 struct DocCache {
-    project_path: std::path::PathBuf,
     available_docs: Vec<(String, std::path::PathBuf)>,
     selected_index: usize,
     content: String,
@@ -221,7 +220,6 @@ impl RustodianApp {
                     if let Some(proj) = &self.selected_project {
                         if proj.path == project_path {
                             let cache = DocCache {
-                                project_path: project_path.clone(),
                                 available_docs,
                                 selected_index: 0,
                                 content: String::new(),

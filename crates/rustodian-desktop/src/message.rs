@@ -73,9 +73,11 @@ pub enum WorkerMessage {
     },
 
     DocStale {
+        #[allow(dead_code)]
         path: PathBuf,
     },
     DocFresh {
+        #[allow(dead_code)]
         path: PathBuf,
     },
 

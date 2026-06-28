@@ -7,8 +7,6 @@ pub struct CommandDiscoverer;
 
 impl CommandDiscoverer {
     pub fn discover(root: &Path) -> Vec<ProjectCommand> {
-        let mut commands = Vec::new();
-
         fn needs_shell(cmd: &str) -> bool {
             cmd.contains("&&")
                 || cmd.contains("||")
@@ -17,6 +15,10 @@ impl CommandDiscoverer {
                 || cmd.contains('<')
                 || cmd.contains("$(")
         }
+
+        let mut commands = Vec::new();
+
+
 
         // 1. Rustodian config (.rustodian.toml)
         let toml_content = fs::read_to_string(root.join(".rustodian.toml"));
@@ -62,7 +64,7 @@ impl CommandDiscoverer {
                     description: Some("npm run script".to_string()),
                     command: format!("npm run {name}"),
                     source: "package.json".to_string(),
-                    use_shell: needs_shell(&name),
+                    use_shell: needs_shell(name),
                 });
             }
         }
