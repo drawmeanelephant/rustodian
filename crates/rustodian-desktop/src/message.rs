@@ -16,13 +16,19 @@ pub enum GuiMessage {
         project_path: PathBuf,
         command_name: String,
         command_str: String,
+        use_shell: bool,
     },
     /// Kill the currently running command (if any).
     KillCommand,
     /// Discover documentation files in a project root.
     DiscoverDocs { project_path: PathBuf },
+    /// Check if a specific document file is fresh.
+    CheckDocFreshness {
+        path: PathBuf,
+        known_mtime: Option<SystemTime>,
+    },
     /// Load the content of a specific document file.
-    LoadDocContent { path: PathBuf },
+    LoadDocContent { path: PathBuf, known_hash: Option<u64> },
 }
 
 /// A parsed markdown block.
@@ -63,10 +69,17 @@ pub enum WorkerMessage {
         available_docs: Vec<(String, PathBuf)>,
     },
 
+    DocStale { path: PathBuf },
+    DocFresh { path: PathBuf },
+
     /// Result of loading and parsing a document.
     DocLoaded {
         content: String,
         parsed: ParsedMarkdown,
         last_modified: Option<SystemTime>,
+        content_hash: u64,
     },
+    
+    /// Result when content has not changed.
+    DocUnchanged,
 }

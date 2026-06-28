@@ -20,26 +20,31 @@ impl ProjectScanner for FsScanner {
     fn scan(&self, root: &Path, config: &ScanConfig) -> Result<Vec<DiscoveredProject>, CoreError> {
         debug!(max_depth = config.max_depth, "Starting filesystem scan");
 
+        if config.max_depth == 0 {
+            tracing::warn!("ScanConfig::max_depth is 0. Returning empty results as this is treated as 'no traversal'.");
+            return Ok(vec![]);
+        }
+
         let mut builder = ignore::WalkBuilder::new(root);
         builder.max_depth(Some(config.max_depth));
         builder.follow_links(config.follow_symlinks);
 
-        // Apply user-specified exclude patterns as override rules.
+        // Apply user-specified exclude patterns using globset.
         if !config.exclude_patterns.is_empty() {
-            let mut overrides = ignore::overrides::OverrideBuilder::new(root);
-            for pattern in &config.exclude_patterns {
-                let negated = format!("!{pattern}");
-                if let Err(e) = overrides.add(&negated) {
-                    tracing::warn!("Invalid exclude pattern '{pattern}': {e}");
+            let mut gsb = globset::GlobSetBuilder::new();
+            for pat in &config.exclude_patterns {
+                if let Ok(glob) = globset::Glob::new(pat) {
+                    gsb.add(glob);
+                } else {
+                    tracing::warn!("Invalid exclude pattern '{pat}'");
                 }
             }
-            match overrides.build() {
-                Ok(built) => {
-                    builder.overrides(built);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to build override rules: {e}");
-                }
+            if let Ok(excl) = gsb.build() {
+                builder.filter_entry(move |e| {
+                    !excl.is_match(e.path())
+                });
+            } else {
+                tracing::warn!("Failed to build exclude globset");
             }
         }
 
@@ -79,7 +84,7 @@ impl ProjectScanner for FsScanner {
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     for root in roots.iter() {
                         if path.starts_with(root) && path != root {
-                            return ignore::WalkState::Continue;
+                            return ignore::WalkState::Skip;
                         }
                     }
                 }

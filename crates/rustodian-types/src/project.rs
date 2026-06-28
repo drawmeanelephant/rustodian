@@ -53,6 +53,8 @@ pub struct ProjectCommand {
     pub description: Option<String>,
     pub command: String,
     pub source: String, // e.g., "Cargo.toml", "package.json", "justfile"
+    #[serde(default)]
+    pub use_shell: bool,
 }
 
 /// Extensible metadata bag.

@@ -73,6 +73,7 @@ struct DocCache {
     content: String,
     parsed: ParsedMarkdown,
     last_modified: Option<SystemTime>,
+    content_hash: u64,
     last_checked: Instant,
 }
 
@@ -94,7 +95,10 @@ struct RustodianApp {
     is_running: bool,
 
     // Document state
-    doc_cache: Option<DocCache>,
+    doc_caches: std::collections::HashMap<std::path::PathBuf, DocCache>,
+
+    // Render state
+    log_display_buf: String,
 }
 
 impl RustodianApp {
@@ -118,63 +122,79 @@ impl RustodianApp {
         command_str: &str,
         project_id: &rustodian_types::ProjectId,
         project_path: &std::path::Path,
+        use_shell: bool,
     ) {
         self.send(GuiMessage::RunCommand {
             project_id: project_id.clone(),
             project_path: project_path.to_path_buf(),
             command_name: command_name.to_string(),
             command_str: command_str.to_string(),
+            use_shell,
         });
     }
 
     fn ensure_doc_cache(&mut self, project: &Project) {
-        if let Some(cache) = &self.doc_cache {
-            if cache.project_path == project.path {
-                // If it's time to check for freshness
-                if cache.last_checked.elapsed() > Duration::from_secs(2) {
-                    if let Some((_, path)) = cache.available_docs.get(cache.selected_index) {
-                        if let Ok(meta) = std::fs::metadata(path) {
-                            if let Ok(modified) = meta.modified() {
-                                if Some(modified) != cache.last_modified {
-                                    self.reload_selected_doc();
-                                }
-                            }
-                        }
-                    }
-                    self.doc_cache.as_mut().unwrap().last_checked = Instant::now();
+        if let Some(cache) = self.doc_caches.get_mut(&project.path) {
+            // If it's time to check for freshness
+            if cache.last_checked.elapsed() > Duration::from_secs(2) {
+                let mut to_check = None;
+                if let Some((_, path)) = cache.available_docs.get(cache.selected_index) {
+                    to_check = Some((path.clone(), cache.last_modified));
                 }
-                return;
+                cache.last_checked = Instant::now();
+                
+                if let Some((path, known_mtime)) = to_check {
+                    self.send(GuiMessage::CheckDocFreshness {
+                        path,
+                        known_mtime,
+                    });
+                }
             }
+            return;
         }
 
         // We don't have the cache, so request discovery
-        self.doc_cache = None;
         self.send(GuiMessage::DiscoverDocs {
             project_path: project.path.clone(),
         });
     }
 
     fn reload_selected_doc(&mut self) {
-        let path_to_load = if let Some(cache) = &mut self.doc_cache {
-            cache
-                .available_docs
-                .get(cache.selected_index)
-                .map(|(_, path)| path.clone())
+        let to_load = if let Some(proj) = &self.selected_project {
+            if let Some(cache) = self.doc_caches.get_mut(&proj.path) {
+                cache
+                    .available_docs
+                    .get(cache.selected_index)
+                    .map(|(_, path)| (path.clone(), cache.content_hash))
+            } else {
+                None
+            }
         } else {
             None
         };
-        if let Some(path) = path_to_load {
-            self.send(GuiMessage::LoadDocContent { path });
+        if let Some((path, hash)) = to_load {
+            self.send(GuiMessage::LoadDocContent { path, known_hash: Some(hash) });
         }
     }
 
     fn process_messages(&mut self) {
         let Some(rx) = &self.worker_rx else { return };
+        let mut needs_reload = false;
 
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 WorkerMessage::ProjectsLoaded(Ok(mut p)) => {
                     p.sort_by(|a, b| a.name.cmp(&b.name));
+                    
+                    // Maintain selected project state
+                    if let Some(selected) = &mut self.selected_project {
+                        if let Some(fresh) = p.iter().find(|x| x.id == selected.id) {
+                            *selected = fresh.clone();
+                        } else {
+                            self.selected_project = None;
+                        }
+                    }
+                    
                     self.projects = p;
                     self.db_error = None;
                 }
@@ -201,20 +221,21 @@ impl RustodianApp {
                     if let Some(proj) = &self.selected_project {
                         if proj.path == project_path {
                             let cache = DocCache {
-                                project_path,
+                                project_path: project_path.clone(),
                                 available_docs,
                                 selected_index: 0,
                                 content: String::new(),
                                 parsed: ParsedMarkdown { blocks: vec![] },
                                 last_modified: None,
+                                content_hash: 0,
                                 last_checked: Instant::now(),
                             };
 
                             if let Some((_, path)) = cache.available_docs.first() {
-                                self.send(GuiMessage::LoadDocContent { path: path.clone() });
+                                self.send(GuiMessage::LoadDocContent { path: path.clone(), known_hash: None });
                             }
 
-                            self.doc_cache = Some(cache);
+                            self.doc_caches.insert(project_path.clone(), cache);
                         }
                     }
                 }
@@ -222,15 +243,36 @@ impl RustodianApp {
                     content,
                     parsed,
                     last_modified,
+                    content_hash,
                 } => {
-                    if let Some(cache) = &mut self.doc_cache {
-                        cache.content = content;
-                        cache.parsed = parsed;
-                        cache.last_modified = last_modified;
-                        cache.last_checked = Instant::now();
+                    if let Some(proj) = &self.selected_project {
+                        if let Some(cache) = self.doc_caches.get_mut(&proj.path) {
+                            cache.content = content;
+                            cache.parsed = parsed;
+                            cache.last_modified = last_modified;
+                            cache.content_hash = content_hash;
+                            cache.last_checked = Instant::now();
+                        }
                     }
                 }
+                WorkerMessage::DocUnchanged => {
+                    if let Some(proj) = &self.selected_project {
+                        if let Some(cache) = self.doc_caches.get_mut(&proj.path) {
+                            cache.last_checked = Instant::now();
+                        }
+                    }
+                }
+                WorkerMessage::DocStale { path: _ } => {
+                    needs_reload = true;
+                }
+                WorkerMessage::DocFresh { path: _ } => {
+                    // It's fresh, do nothing, the last_checked was already reset on dispatch
+                }
             }
+        }
+        
+        if needs_reload {
+            self.reload_selected_doc();
         }
     }
 }
@@ -284,7 +326,8 @@ impl eframe::App for RustodianApp {
                             self.running_cmd_log = None;
                             self.running_cmd_status = None;
                             self.is_running = false;
-                            self.doc_cache = None;
+                            // Cache is now preserved across switches
+                            // but we can ensure it exists later
                         }
                         self.selected_project = Some(proj);
                     }
@@ -362,11 +405,11 @@ impl RustodianApp {
     fn render_runner_logs(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         if self.is_running {
             let cmd_name = self.running_cmd_name.clone().unwrap_or_default();
-            let log_snapshot = self
-                .running_cmd_log
-                .as_ref()
-                .map(LogBuffer::snapshot)
-                .unwrap_or_default();
+            if let Some(log_buf) = &self.running_cmd_log {
+                log_buf.snapshot_into(&mut self.log_display_buf);
+            } else {
+                self.log_display_buf.clear();
+            }
 
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -381,7 +424,7 @@ impl RustodianApp {
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     ui.add(
-                        egui::TextEdit::multiline(&mut log_snapshot.as_str())
+                        egui::TextEdit::multiline(&mut self.log_display_buf.as_str())
                             .font(egui::TextStyle::Monospace)
                             .desired_width(f32::INFINITY),
                     );
@@ -401,14 +444,14 @@ impl RustodianApp {
                         }
                     });
 
-                    let log_text = log_buf.snapshot();
+                    log_buf.snapshot_into(&mut self.log_display_buf);
 
                     egui::ScrollArea::vertical()
                         .max_height(250.0)
                         .stick_to_bottom(true)
                         .show(ui, |ui| {
                             ui.add(
-                                egui::TextEdit::multiline(&mut log_text.as_str())
+                                egui::TextEdit::multiline(&mut self.log_display_buf.as_str())
                                     .font(egui::TextStyle::Monospace)
                                     .desired_width(f32::INFINITY),
                             );
@@ -455,6 +498,7 @@ impl RustodianApp {
                                         &cmd.command,
                                         &project.id,
                                         &project.path,
+                                        cmd.use_shell,
                                     );
                                 }
                                 ui.end_row();
@@ -474,11 +518,9 @@ impl RustodianApp {
 
         self.ensure_doc_cache(&project);
 
-        if self
-            .doc_cache
-            .as_ref()
-            .is_none_or(|c| c.available_docs.is_empty())
-        {
+        let has_cache = self.doc_caches.contains_key(&project.path);
+        let has_docs = has_cache && !self.doc_caches[&project.path].available_docs.is_empty();
+        if !has_docs {
             ui.label(
                 "No documentation files (TODO.md, CHANGELOG.md, README.md) found in this project.",
             );
@@ -487,7 +529,7 @@ impl RustodianApp {
 
         let mut needs_reload = false;
         ui.horizontal(|ui| {
-            let cache = self.doc_cache.as_mut().unwrap();
+            let cache = self.doc_caches.get_mut(&project.path).unwrap();
             for (i, (name, _)) in cache.available_docs.iter().enumerate() {
                 if ui
                     .selectable_label(cache.selected_index == i, name)
@@ -510,7 +552,7 @@ impl RustodianApp {
             self.reload_selected_doc();
         }
 
-        let parsed = match &self.doc_cache {
+        let parsed = match self.doc_caches.get(&project.path) {
             Some(c) => c.parsed.clone(),
             None => return,
         };
