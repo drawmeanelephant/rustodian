@@ -1,7 +1,7 @@
 //! Persistence for command execution logs.
 
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::store::SqliteStore;
@@ -71,7 +71,14 @@ impl SqliteStore {
                 let exit_code: Option<i32> = row.get(3)?;
                 let log_text: String = row.get(4)?;
                 let run_at_str: String = row.get(5)?;
-                Ok((id, project_id, command_name, exit_code, log_text, run_at_str))
+                Ok((
+                    id,
+                    project_id,
+                    command_name,
+                    exit_code,
+                    log_text,
+                    run_at_str,
+                ))
             })
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
@@ -109,7 +116,6 @@ impl SqliteStore {
             )
             .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
 
-        use rusqlite::OptionalExtension;
         let row = stmt
             .query_row(params![id], |row| {
                 let id: String = row.get(0)?;
@@ -118,7 +124,14 @@ impl SqliteStore {
                 let exit_code: Option<i32> = row.get(3)?;
                 let log_text: String = row.get(4)?;
                 let run_at_str: String = row.get(5)?;
-                Ok((id, project_id, command_name, exit_code, log_text, run_at_str))
+                Ok((
+                    id,
+                    project_id,
+                    command_name,
+                    exit_code,
+                    log_text,
+                    run_at_str,
+                ))
             })
             .optional()
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
@@ -126,7 +139,9 @@ impl SqliteStore {
         match row {
             Some((id, project_id, command_name, exit_code, log_text, run_at_str)) => {
                 let run_at = chrono::DateTime::parse_from_rfc3339(&run_at_str)
-                    .map_err(|e| CoreError::Storage(format!("invalid timestamp '{run_at_str}': {e}")))?
+                    .map_err(|e| {
+                        CoreError::Storage(format!("invalid timestamp '{run_at_str}': {e}"))
+                    })?
                     .with_timezone(&Utc);
                 Ok(Some(ProjectLog {
                     id,
@@ -158,7 +173,6 @@ impl SqliteStore {
             )
             .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
 
-        use rusqlite::OptionalExtension;
         let row = stmt
             .query_row(params![project_id], |row| {
                 let id: String = row.get(0)?;
@@ -167,7 +181,14 @@ impl SqliteStore {
                 let exit_code: Option<i32> = row.get(3)?;
                 let log_text: String = row.get(4)?;
                 let run_at_str: String = row.get(5)?;
-                Ok((id, project_id, command_name, exit_code, log_text, run_at_str))
+                Ok((
+                    id,
+                    project_id,
+                    command_name,
+                    exit_code,
+                    log_text,
+                    run_at_str,
+                ))
             })
             .optional()
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
@@ -175,7 +196,9 @@ impl SqliteStore {
         match row {
             Some((id, project_id, command_name, exit_code, log_text, run_at_str)) => {
                 let run_at = chrono::DateTime::parse_from_rfc3339(&run_at_str)
-                    .map_err(|e| CoreError::Storage(format!("invalid timestamp '{run_at_str}': {e}")))?
+                    .map_err(|e| {
+                        CoreError::Storage(format!("invalid timestamp '{run_at_str}': {e}"))
+                    })?
                     .with_timezone(&Utc);
                 Ok(Some(ProjectLog {
                     id,

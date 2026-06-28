@@ -68,8 +68,7 @@ impl CommandRunner for DefaultCommandRunner {
             c
         };
 
-        cmd.current_dir(&spec.working_dir)
-            .envs(&spec.env);
+        cmd.current_dir(&spec.working_dir).envs(&spec.env);
 
         if spec.capture_output {
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());

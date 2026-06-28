@@ -16,7 +16,7 @@ pub fn execute(
     let project = custodian
         .find_project(project_query)
         .context("Failed to find project")?
-        .ok_or_else(|| anyhow::anyhow!("Project not found: {}", project_query))?;
+        .ok_or_else(|| anyhow::anyhow!("Project not found: {project_query}"))?;
 
     let logs = store
         .list_logs(&project.id.to_string(), limit)
@@ -31,8 +31,17 @@ pub fn execute(
             let mut table = comfy_table::Table::new();
             table.set_header(vec!["ID", "Command", "Run At", "Exit Code", "Log Snippet"]);
             for log in logs {
-                let snippet = log.log_text.lines().last().unwrap_or("").chars().take(50).collect::<String>();
-                let exit_code = log.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "running".to_string());
+                let snippet = log
+                    .log_text
+                    .lines()
+                    .last()
+                    .unwrap_or("")
+                    .chars()
+                    .take(50)
+                    .collect::<String>();
+                let exit_code = log
+                    .exit_code
+                    .map_or_else(|| "running".to_string(), |c| c.to_string());
                 table.add_row(vec![
                     log.id,
                     log.command_name,

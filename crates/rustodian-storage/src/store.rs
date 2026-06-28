@@ -103,7 +103,7 @@ fn parse_project_row(
     );
     let path = PathBuf::from(path_str);
     let discovered_at = chrono::DateTime::parse_from_rfc3339(disc_str)
-        .map_err(|e| CoreError::Storage(format!("invalid timestamp '{disc_str}': {e}")))?  
+        .map_err(|e| CoreError::Storage(format!("invalid timestamp '{disc_str}': {e}")))?
         .with_timezone(&chrono::Utc);
     let last_scanned_at = scan_str
         .map(|s| {
@@ -221,7 +221,9 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
         if let Some((id_str, name, path_str, disc_str, scan_str, meta_str)) = project {
-            Ok(Some(parse_project_row(&id_str, name, path_str, &disc_str, scan_str, &meta_str)?))
+            Ok(Some(parse_project_row(
+                &id_str, name, path_str, &disc_str, scan_str, &meta_str,
+            )?))
         } else {
             Ok(None)
         }
@@ -302,7 +304,9 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
         if let Some((id_str, name, path_str, disc_str, scan_str, meta_str)) = project {
-            Ok(Some(parse_project_row(&id_str, name, path_str, &disc_str, scan_str, &meta_str)?))
+            Ok(Some(parse_project_row(
+                &id_str, name, path_str, &disc_str, scan_str, &meta_str,
+            )?))
         } else {
             Ok(None)
         }
@@ -358,13 +362,13 @@ impl ProjectStore for SqliteStore {
             .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
 
         if let Some((id_str, root_str, start_str, end_str, found, status_str)) = scan {
-            let id = ScanId(
-                uuid::Uuid::parse_str(&id_str)
-                    .map_err(|e| CoreError::Storage(format!("invalid scan UUID '{id_str}': {e}")))?,
-            );
+            let id =
+                ScanId(uuid::Uuid::parse_str(&id_str).map_err(|e| {
+                    CoreError::Storage(format!("invalid scan UUID '{id_str}': {e}"))
+                })?);
             let root_path = PathBuf::from(root_str);
             let started_at = chrono::DateTime::parse_from_rfc3339(&start_str)
-                .map_err(|e| CoreError::Storage(format!("invalid timestamp '{start_str}': {e}")))?  
+                .map_err(|e| CoreError::Storage(format!("invalid timestamp '{start_str}': {e}")))?
                 .with_timezone(&chrono::Utc);
             let completed_at = end_str
                 .map(|s| {
