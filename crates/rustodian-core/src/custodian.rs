@@ -170,21 +170,21 @@ impl Custodian {
         info!("Getting status");
         let projects = self.store.list_projects()?;
         let last_scan = self.store.get_latest_scan()?;
-        
+
         let mut lang_counts = HashMap::new();
         for p in &projects {
             if let Some(primary) = p.languages.first() {
                 *lang_counts.entry(primary.language.clone()).or_insert(0) += 1;
             }
         }
-        
+
         let mut languages: Vec<(String, usize)> = lang_counts
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();
         // Sort by count descending, then name alphabetically
         languages.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        
+
         Ok(StatusReport {
             total_projects: projects.len(),
             last_scan,

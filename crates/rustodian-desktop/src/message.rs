@@ -28,7 +28,10 @@ pub enum GuiMessage {
         known_mtime: Option<SystemTime>,
     },
     /// Load the content of a specific document file.
-    LoadDocContent { path: PathBuf, known_hash: Option<u64> },
+    LoadDocContent {
+        path: PathBuf,
+        known_hash: Option<u64>,
+    },
 }
 
 /// A parsed markdown block.
@@ -69,8 +72,12 @@ pub enum WorkerMessage {
         available_docs: Vec<(String, PathBuf)>,
     },
 
-    DocStale { path: PathBuf },
-    DocFresh { path: PathBuf },
+    DocStale {
+        path: PathBuf,
+    },
+    DocFresh {
+        path: PathBuf,
+    },
 
     /// Result of loading and parsing a document.
     DocLoaded {
@@ -79,7 +86,7 @@ pub enum WorkerMessage {
         last_modified: Option<SystemTime>,
         content_hash: u64,
     },
-    
+
     /// Result when content has not changed.
     DocUnchanged,
 }

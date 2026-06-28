@@ -142,12 +142,9 @@ impl RustodianApp {
                     to_check = Some((path.clone(), cache.last_modified));
                 }
                 cache.last_checked = Instant::now();
-                
+
                 if let Some((path, known_mtime)) = to_check {
-                    self.send(GuiMessage::CheckDocFreshness {
-                        path,
-                        known_mtime,
-                    });
+                    self.send(GuiMessage::CheckDocFreshness { path, known_mtime });
                 }
             }
             return;
@@ -173,7 +170,10 @@ impl RustodianApp {
             None
         };
         if let Some((path, hash)) = to_load {
-            self.send(GuiMessage::LoadDocContent { path, known_hash: Some(hash) });
+            self.send(GuiMessage::LoadDocContent {
+                path,
+                known_hash: Some(hash),
+            });
         }
     }
 
@@ -185,7 +185,7 @@ impl RustodianApp {
             match msg {
                 WorkerMessage::ProjectsLoaded(Ok(mut p)) => {
                     p.sort_by(|a, b| a.name.cmp(&b.name));
-                    
+
                     // Maintain selected project state
                     if let Some(selected) = &mut self.selected_project {
                         if let Some(fresh) = p.iter().find(|x| x.id == selected.id) {
@@ -194,7 +194,7 @@ impl RustodianApp {
                             self.selected_project = None;
                         }
                     }
-                    
+
                     self.projects = p;
                     self.db_error = None;
                 }
@@ -232,7 +232,10 @@ impl RustodianApp {
                             };
 
                             if let Some((_, path)) = cache.available_docs.first() {
-                                self.send(GuiMessage::LoadDocContent { path: path.clone(), known_hash: None });
+                                self.send(GuiMessage::LoadDocContent {
+                                    path: path.clone(),
+                                    known_hash: None,
+                                });
                             }
 
                             self.doc_caches.insert(project_path.clone(), cache);
@@ -270,7 +273,7 @@ impl RustodianApp {
                 }
             }
         }
-        
+
         if needs_reload {
             self.reload_selected_doc();
         }

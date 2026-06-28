@@ -21,7 +21,9 @@ impl ProjectScanner for FsScanner {
         debug!(max_depth = config.max_depth, "Starting filesystem scan");
 
         if config.max_depth == 0 {
-            tracing::warn!("ScanConfig::max_depth is 0. Returning empty results as this is treated as 'no traversal'.");
+            tracing::warn!(
+                "ScanConfig::max_depth is 0. Returning empty results as this is treated as 'no traversal'."
+            );
             return Ok(vec![]);
         }
 
@@ -40,9 +42,7 @@ impl ProjectScanner for FsScanner {
                 }
             }
             if let Ok(excl) = gsb.build() {
-                builder.filter_entry(move |e| {
-                    !excl.is_match(e.path())
-                });
+                builder.filter_entry(move |e| !excl.is_match(e.path()));
             } else {
                 tracing::warn!("Failed to build exclude globset");
             }

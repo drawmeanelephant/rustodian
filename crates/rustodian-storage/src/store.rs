@@ -259,9 +259,18 @@ impl ProjectStore for SqliteStore {
                     continue;
                 }
             };
-            match parse_project_row(&id_str, name, path_str.clone(), &disc_str, scan_str, &meta_str) {
+            match parse_project_row(
+                &id_str,
+                name,
+                path_str.clone(),
+                &disc_str,
+                scan_str,
+                &meta_str,
+            ) {
                 Ok(proj) => projects.push(proj),
-                Err(e) => tracing::warn!("Skipping invalid project data for path '{path_str}': {e}"),
+                Err(e) => {
+                    tracing::warn!("Skipping invalid project data for path '{path_str}': {e}")
+                }
             }
         }
         Ok(projects)

@@ -200,14 +200,19 @@ pub fn run_worker(
             } => {
                 // Kill any existing process first
                 if let Some(proc_arc) = state.running_process.take() {
-                    if !state.process_exited.load(std::sync::atomic::Ordering::SeqCst) {
+                    if !state
+                        .process_exited
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                    {
                         let mut proc = proc_arc.lock().unwrap();
                         let _ = proc.kill();
                     }
                 }
                 *state.is_running.lock().unwrap() = true;
                 *state.should_kill.lock().unwrap() = false;
-                state.process_exited.store(false, std::sync::atomic::Ordering::SeqCst);
+                state
+                    .process_exited
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
 
                 let log_buffer = LogBuffer::new();
                 let log_buffer_clone = log_buffer.clone();
@@ -283,7 +288,7 @@ pub fn run_worker(
                             if let Some(h) = stderr_handle {
                                 let _ = h.join();
                             }
-                            
+
                             process_exited_clone.store(true, std::sync::atomic::Ordering::SeqCst);
                             let mut proc = process_arc.lock().unwrap();
                             let _ = proc.wait();
@@ -338,7 +343,10 @@ pub fn run_worker(
             GuiMessage::KillCommand => {
                 if let Some(proc_arc) = state.running_process.take() {
                     *state.should_kill.lock().unwrap() = true;
-                    if !state.process_exited.load(std::sync::atomic::Ordering::SeqCst) {
+                    if !state
+                        .process_exited
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                    {
                         let mut proc = proc_arc.lock().unwrap();
                         let _ = proc.kill();
                     }
@@ -364,7 +372,7 @@ pub fn run_worker(
             GuiMessage::LoadDocContent { path, known_hash } => {
                 let content = fs::read_to_string(&path)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
-                
+
                 let mut hasher = ahash::AHasher::default();
                 std::hash::Hash::hash(&content, &mut hasher);
                 let content_hash = std::hash::Hasher::finish(&hasher);
