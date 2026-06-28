@@ -47,9 +47,18 @@ impl CommandRunner for DefaultCommandRunner {
             } else {
                 format!("{} {}", spec.program, spec.args.join(" "))
             };
-            let mut c = Command::new("sh");
-            c.arg("-c").arg(&shell_cmd);
-            c
+            #[cfg(unix)]
+            {
+                let mut c = Command::new("sh");
+                c.arg("-c").arg(&shell_cmd);
+                c
+            }
+            #[cfg(not(unix))]
+            {
+                let mut c = Command::new("cmd");
+                c.arg("/C").arg(&shell_cmd);
+                c
+            }
         } else {
             // If the user specifies `use_shell=false`, but `spec.program` is actually a full command string,
             // we should parse it with shlex.
@@ -119,16 +128,16 @@ impl RunningProcess for DefaultRunningProcess {
             let pid = Pid::from_raw(self.child.id().cast_signed());
             // Kill the entire process group
             let _ = kill(Pid::from_raw(-pid.as_raw()), Signal::SIGKILL);
-
-            // Reap the zombie
-            let _ = self.child.wait();
             Ok(())
         }
 
         #[cfg(not(unix))]
         {
+            let pid = self.child.id();
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .output();
             let _ = self.child.kill();
-            let _ = self.child.wait();
             Ok(())
         }
     }

@@ -163,9 +163,10 @@ fn discover_docs(project_path: &Path) -> Vec<(String, PathBuf)> {
 
 pub struct WorkerState {
     pub store: Arc<SqliteStore>,
-    pub running_process: Option<Box<dyn RunningProcess>>,
+    pub running_process: Option<Arc<Mutex<Box<dyn RunningProcess>>>>,
     pub is_running: Arc<Mutex<bool>>,
     pub should_kill: Arc<Mutex<bool>>,
+    pub process_exited: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -180,6 +181,7 @@ pub fn run_worker(
         running_process: None,
         is_running: Arc::new(Mutex::new(false)),
         should_kill: Arc::new(Mutex::new(false)),
+        process_exited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     while let Ok(msg) = rx.recv() {
@@ -194,13 +196,23 @@ pub fn run_worker(
                 project_path,
                 command_name,
                 command_str,
+                use_shell,
             } => {
                 // Kill any existing process first
-                if let Some(mut proc) = state.running_process.take() {
-                    let _ = proc.kill();
+                if let Some(proc_arc) = state.running_process.take() {
+                    if !state
+                        .process_exited
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                    {
+                        let mut proc = proc_arc.lock().unwrap();
+                        let _ = proc.kill();
+                    }
                 }
                 *state.is_running.lock().unwrap() = true;
                 *state.should_kill.lock().unwrap() = false;
+                state
+                    .process_exited
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
 
                 let log_buffer = LogBuffer::new();
                 let log_buffer_clone = log_buffer.clone();
@@ -218,7 +230,7 @@ pub fn run_worker(
                     args: vec![],
                     working_dir: project_path,
                     env: HashMap::new(),
-                    use_shell: false,
+                    use_shell,
                     capture_output: true,
                 };
 
@@ -228,7 +240,8 @@ pub fn run_worker(
                         let stdout = child.stdout();
                         let stderr = child.stderr();
 
-                        state.running_process = Some(child);
+                        let process_arc = Arc::new(Mutex::new(child));
+                        state.running_process = Some(process_arc.clone());
 
                         let stdout_log = log_buffer.clone();
                         let mut stdout_handle = None;
@@ -264,6 +277,7 @@ pub fn run_worker(
                         let cmd_name = command_name.clone();
                         let ctx_clone = ctx.clone();
                         let should_kill_clone = state.should_kill.clone();
+                        let process_exited_clone = state.process_exited.clone();
 
                         // Wait thread
                         thread::spawn(move || {
@@ -274,6 +288,10 @@ pub fn run_worker(
                             if let Some(h) = stderr_handle {
                                 let _ = h.join();
                             }
+
+                            process_exited_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let mut proc = process_arc.lock().unwrap();
+                            let _ = proc.wait();
 
                             let mut exit_code = None;
                             let killed = *should_kill_clone.lock().unwrap();
@@ -323,9 +341,15 @@ pub fn run_worker(
                 }
             }
             GuiMessage::KillCommand => {
-                if let Some(mut proc) = state.running_process.take() {
+                if let Some(proc_arc) = state.running_process.take() {
                     *state.should_kill.lock().unwrap() = true;
-                    let _ = proc.kill();
+                    if !state
+                        .process_exited
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                    {
+                        let mut proc = proc_arc.lock().unwrap();
+                        let _ = proc.kill();
+                    }
                 }
             }
             GuiMessage::DiscoverDocs { project_path } => {
@@ -336,17 +360,36 @@ pub fn run_worker(
                 });
                 ctx.request_repaint();
             }
-            GuiMessage::LoadDocContent { path } => {
+            GuiMessage::CheckDocFreshness { path, known_mtime } => {
+                let current_mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                if known_mtime == current_mtime {
+                    let _ = tx.send(WorkerMessage::DocFresh { path });
+                } else {
+                    let _ = tx.send(WorkerMessage::DocStale { path });
+                }
+                ctx.request_repaint();
+            }
+            GuiMessage::LoadDocContent { path, known_hash } => {
                 let content = fs::read_to_string(&path)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
-                let last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
-                let parsed = parse_markdown(&content);
 
-                let _ = tx.send(WorkerMessage::DocLoaded {
-                    content,
-                    parsed,
-                    last_modified,
-                });
+                let mut hasher = ahash::AHasher::default();
+                std::hash::Hash::hash(&content, &mut hasher);
+                let content_hash = std::hash::Hasher::finish(&hasher);
+
+                if Some(content_hash) == known_hash {
+                    let _ = tx.send(WorkerMessage::DocUnchanged);
+                } else {
+                    let last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                    let parsed = parse_markdown(&content);
+
+                    let _ = tx.send(WorkerMessage::DocLoaded {
+                        content,
+                        parsed,
+                        last_modified,
+                        content_hash,
+                    });
+                }
                 ctx.request_repaint();
             }
         }

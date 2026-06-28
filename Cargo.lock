@@ -3345,6 +3345,7 @@ dependencies = [
 name = "rustodian-desktop"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "chrono",
  "eframe",
@@ -3390,6 +3391,7 @@ dependencies = [
 name = "rustodian-scanner"
 version = "0.1.0"
 dependencies = [
+ "globset",
  "ignore",
  "rustodian-core",
  "rustodian-types",

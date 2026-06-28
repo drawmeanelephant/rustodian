@@ -54,17 +54,21 @@ impl LogBuffer {
     /// Return a snapshot of all buffered lines joined by newlines.
     #[must_use]
     pub fn snapshot(&self) -> String {
-        self.inner
-            .lock()
-            .map(|inner| {
-                let mut s = String::new();
-                for line in &inner.lines {
-                    s.push_str(line);
-                    s.push('\n');
-                }
-                s
-            })
-            .unwrap_or_default()
+        let mut s = String::new();
+        self.snapshot_into(&mut s);
+        s
+    }
+
+    /// Fill a caller-provided String with a snapshot of all buffered lines,
+    /// reusing the string's capacity instead of allocating a new one.
+    pub fn snapshot_into(&self, buf: &mut String) {
+        buf.clear();
+        if let Ok(inner) = self.inner.lock() {
+            for line in &inner.lines {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+        }
     }
 
     /// Return the number of lines currently in the buffer.

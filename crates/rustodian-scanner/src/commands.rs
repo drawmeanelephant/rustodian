@@ -7,6 +7,15 @@ pub struct CommandDiscoverer;
 
 impl CommandDiscoverer {
     pub fn discover(root: &Path) -> Vec<ProjectCommand> {
+        fn needs_shell(cmd: &str) -> bool {
+            cmd.contains("&&")
+                || cmd.contains("||")
+                || cmd.contains('|')
+                || cmd.contains('>')
+                || cmd.contains('<')
+                || cmd.contains("$(")
+        }
+
         let mut commands = Vec::new();
 
         // 1. Rustodian config (.rustodian.toml)
@@ -26,6 +35,7 @@ impl CommandDiscoverer {
                         description: Some("rustodian config".to_string()),
                         command: cmd_str.to_string(),
                         source: ".rustodian.toml".to_string(),
+                        use_shell: needs_shell(cmd_str),
                     });
                 }
             }
@@ -52,6 +62,7 @@ impl CommandDiscoverer {
                     description: Some("npm run script".to_string()),
                     command: format!("npm run {name}"),
                     source: "package.json".to_string(),
+                    use_shell: needs_shell(name),
                 });
             }
         }
@@ -81,6 +92,7 @@ impl CommandDiscoverer {
                                 description: Some("just recipe".to_string()),
                                 command: format!("just {n}"),
                                 source: "justfile".to_string(),
+                                use_shell: needs_shell(n),
                             });
                         }
                     }
@@ -99,30 +111,35 @@ impl CommandDiscoverer {
                 description: Some("Run cargo test".to_string()),
                 command: "cargo test".to_string(),
                 source: "Cargo.toml".to_string(),
+                use_shell: false,
             },
             ProjectCommand {
                 name: "build".to_string(),
                 description: Some("Run cargo build".to_string()),
                 command: "cargo build".to_string(),
                 source: "Cargo.toml".to_string(),
+                use_shell: false,
             },
             ProjectCommand {
                 name: "check".to_string(),
                 description: Some("Run cargo check".to_string()),
                 command: "cargo check".to_string(),
                 source: "Cargo.toml".to_string(),
+                use_shell: false,
             },
             ProjectCommand {
                 name: "clippy".to_string(),
                 description: Some("Run cargo clippy".to_string()),
                 command: "cargo clippy".to_string(),
                 source: "Cargo.toml".to_string(),
+                use_shell: false,
             },
             ProjectCommand {
                 name: "fmt".to_string(),
                 description: Some("Run cargo fmt".to_string()),
                 command: "cargo fmt".to_string(),
                 source: "Cargo.toml".to_string(),
+                use_shell: false,
             },
         ]
     }
