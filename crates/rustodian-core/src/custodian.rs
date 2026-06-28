@@ -148,6 +148,7 @@ impl Custodian {
             working_dir: project.path.clone(),
             env: HashMap::new(),
             use_shell: false,
+            capture_output: false,
         };
 
         let mut child = self.runner.spawn(spec)?;

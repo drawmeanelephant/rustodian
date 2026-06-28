@@ -48,8 +48,9 @@ impl ProjectScanner for FsScanner {
 
         let projects: std::sync::Arc<std::sync::Mutex<Vec<DiscoveredProject>>> =
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let project_roots: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let project_roots: std::sync::Arc<
+            std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
         let walker = builder.build_parallel();
         walker.run(|| {
@@ -73,7 +74,9 @@ impl ProjectScanner for FsScanner {
                 // project root. This prevents detecting nested sub-projects
                 // (e.g. a workspace member inside a Cargo workspace root).
                 {
-                    let roots = project_roots.lock().unwrap_or_else(|e| e.into_inner());
+                    let roots = project_roots
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     for root in roots.iter() {
                         if path.starts_with(root) && path != root {
                             return ignore::WalkState::Continue;
@@ -114,8 +117,13 @@ impl ProjectScanner for FsScanner {
         });
 
         let mut projects = match std::sync::Arc::try_unwrap(projects) {
-            Ok(mutex) => mutex.into_inner().unwrap_or_else(|e| e.into_inner()),
-            Err(arc) => arc.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            Ok(mutex) => mutex
+                .into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            Err(arc) => arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
         };
 
         // Sort by path for deterministic output regardless of walk order.

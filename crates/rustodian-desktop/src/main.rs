@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use anyhow::{Context, Result};
 use eframe::egui;
 use rustodian_storage::SqliteStore;
@@ -34,12 +36,12 @@ fn main() -> eframe::Result {
 
             let ctx_clone = cc.egui_ctx.clone();
             std::thread::spawn(move || {
-                worker::run_worker(store, worker_rx, worker_tx, ctx_clone);
+                worker::run_worker(store, &worker_rx, &worker_tx, &ctx_clone);
             });
 
             let mut app = RustodianApp {
-                worker_tx: gui_tx,
-                worker_rx: gui_rx,
+                worker_tx: Some(gui_tx),
+                worker_rx: Some(gui_rx),
                 ..Default::default()
             };
             app.load_projects();
@@ -80,7 +82,7 @@ struct RustodianApp {
     selected_project: Option<Project>,
     projects: Vec<Project>,
     db_error: Option<String>,
-    
+
     // Channels to/from worker
     worker_tx: Option<std::sync::mpsc::Sender<GuiMessage>>,
     worker_rx: Option<std::sync::mpsc::Receiver<WorkerMessage>>,
@@ -153,16 +155,22 @@ impl RustodianApp {
     }
 
     fn reload_selected_doc(&mut self) {
-        if let Some(cache) = &mut self.doc_cache {
-            if let Some((_, path)) = cache.available_docs.get(cache.selected_index) {
-                self.send(GuiMessage::LoadDocContent { path: path.clone() });
-            }
+        let path_to_load = if let Some(cache) = &mut self.doc_cache {
+            cache
+                .available_docs
+                .get(cache.selected_index)
+                .map(|(_, path)| path.clone())
+        } else {
+            None
+        };
+        if let Some(path) = path_to_load {
+            self.send(GuiMessage::LoadDocContent { path });
         }
     }
 
     fn process_messages(&mut self) {
         let Some(rx) = &self.worker_rx else { return };
-        
+
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 WorkerMessage::ProjectsLoaded(Ok(mut p)) => {
@@ -173,7 +181,12 @@ impl RustodianApp {
                 WorkerMessage::ProjectsLoaded(Err(e)) => {
                     self.db_error = Some(format!("Failed to load projects: {e}"));
                 }
-                WorkerMessage::CommandStatus { command_name, is_running, exit_status, log_buffer } => {
+                WorkerMessage::CommandStatus {
+                    command_name,
+                    is_running,
+                    exit_status,
+                    log_buffer,
+                } => {
                     self.running_cmd_name = Some(command_name);
                     self.is_running = is_running;
                     if exit_status.is_some() {
@@ -181,10 +194,13 @@ impl RustodianApp {
                     }
                     self.running_cmd_log = Some(log_buffer);
                 }
-                WorkerMessage::DocsDiscovered { project_path, available_docs } => {
+                WorkerMessage::DocsDiscovered {
+                    project_path,
+                    available_docs,
+                } => {
                     if let Some(proj) = &self.selected_project {
                         if proj.path == project_path {
-                            let mut cache = DocCache {
+                            let cache = DocCache {
                                 project_path,
                                 available_docs,
                                 selected_index: 0,
@@ -193,16 +209,20 @@ impl RustodianApp {
                                 last_modified: None,
                                 last_checked: Instant::now(),
                             };
-                            
+
                             if let Some((_, path)) = cache.available_docs.first() {
                                 self.send(GuiMessage::LoadDocContent { path: path.clone() });
                             }
-                            
+
                             self.doc_cache = Some(cache);
                         }
                     }
                 }
-                WorkerMessage::DocLoaded { path: _, content, parsed, last_modified } => {
+                WorkerMessage::DocLoaded {
+                    content,
+                    parsed,
+                    last_modified,
+                } => {
                     if let Some(cache) = &mut self.doc_cache {
                         cache.content = content;
                         cache.parsed = parsed;
@@ -216,6 +236,7 @@ impl RustodianApp {
 }
 
 impl eframe::App for RustodianApp {
+    #[allow(clippy::too_many_lines)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_messages();
 
@@ -250,7 +271,7 @@ impl eframe::App for RustodianApp {
                             }
                         }
                     });
-                    
+
                     if let Some(idx) = clicked_index {
                         let proj = self.projects[idx].clone();
                         let switching = self
@@ -341,7 +362,11 @@ impl RustodianApp {
     fn render_runner_logs(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         if self.is_running {
             let cmd_name = self.running_cmd_name.clone().unwrap_or_default();
-            let mut log_snapshot = self.running_cmd_log.as_ref().map(|l| l.snapshot()).unwrap_or_default();
+            let log_snapshot = self
+                .running_cmd_log
+                .as_ref()
+                .map(LogBuffer::snapshot)
+                .unwrap_or_default();
 
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -366,17 +391,17 @@ impl RustodianApp {
             if let Some(log_buf) = &self.running_cmd_log {
                 let status_label = self.running_cmd_status.as_deref().unwrap_or("unknown");
                 let cmd_name = self.running_cmd_name.as_deref().unwrap_or("unknown");
-                
+
                 let count = log_buf.line_count();
                 if count > 0 || status_label != "unknown" {
                     ui.horizontal(|ui| {
-                        ui.label(format!("Last run: {} — {}", cmd_name, status_label));
+                        ui.label(format!("Last run: {cmd_name} — {status_label}"));
                         if ui.small_button("✕ Clear").clicked() {
                             should_clear = true;
                         }
                     });
 
-                    let mut log_text = log_buf.snapshot();
+                    let log_text = log_buf.snapshot();
 
                     egui::ScrollArea::vertical()
                         .max_height(250.0)
@@ -392,7 +417,7 @@ impl RustodianApp {
                     ui.separator();
                 }
             }
-            
+
             if should_clear {
                 self.running_cmd_log = None;
                 self.running_cmd_name = None;
@@ -425,7 +450,12 @@ impl RustodianApp {
                                 ui.label(&cmd.source);
                                 ui.monospace(&cmd.command);
                                 if ui.button("▶ Run").clicked() {
-                                    self.run_command(&cmd.name, &cmd.command, &project.id, &project.path);
+                                    self.run_command(
+                                        &cmd.name,
+                                        &cmd.command,
+                                        &project.id,
+                                        &project.path,
+                                    );
                                 }
                                 ui.end_row();
                             }
@@ -444,8 +474,14 @@ impl RustodianApp {
 
         self.ensure_doc_cache(&project);
 
-        if self.doc_cache.as_ref().is_none_or(|c| c.available_docs.is_empty()) {
-            ui.label("No documentation files (TODO.md, CHANGELOG.md, README.md) found in this project.");
+        if self
+            .doc_cache
+            .as_ref()
+            .is_none_or(|c| c.available_docs.is_empty())
+        {
+            ui.label(
+                "No documentation files (TODO.md, CHANGELOG.md, README.md) found in this project.",
+            );
             return;
         }
 

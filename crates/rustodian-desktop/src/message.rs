@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use rustodian_types::{Project, ProjectId};
 use rustodian_core::log_buffer::LogBuffer;
+use rustodian_types::{Project, ProjectId};
 
 /// Messages sent from the GUI thread to the Background Worker thread.
 pub enum GuiMessage {
@@ -20,13 +20,9 @@ pub enum GuiMessage {
     /// Kill the currently running command (if any).
     KillCommand,
     /// Discover documentation files in a project root.
-    DiscoverDocs {
-        project_path: PathBuf,
-    },
+    DiscoverDocs { project_path: PathBuf },
     /// Load the content of a specific document file.
-    LoadDocContent {
-        path: PathBuf,
-    },
+    LoadDocContent { path: PathBuf },
 }
 
 /// A parsed markdown block.
@@ -52,7 +48,7 @@ pub struct ParsedMarkdown {
 pub enum WorkerMessage {
     /// Result of loading projects.
     ProjectsLoaded(Result<Vec<Project>, String>),
-    
+
     /// Status update for a running command.
     CommandStatus {
         command_name: String,
@@ -60,16 +56,15 @@ pub enum WorkerMessage {
         exit_status: Option<String>,
         log_buffer: LogBuffer,
     },
-    
+
     /// Result of discovering documentation files.
     DocsDiscovered {
         project_path: PathBuf,
         available_docs: Vec<(String, PathBuf)>,
     },
-    
+
     /// Result of loading and parsing a document.
     DocLoaded {
-        path: PathBuf,
         content: String,
         parsed: ParsedMarkdown,
         last_modified: Option<SystemTime>,

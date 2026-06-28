@@ -9,10 +9,9 @@ use std::thread;
 use chrono::Utc;
 
 use rustodian_core::log_buffer::LogBuffer;
-use rustodian_core::runner::{CommandSpec, DefaultCommandRunner, DefaultRunningProcess};
-use rustodian_core::traits::{CommandRunner, RunningProcess};
+use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
+use rustodian_core::traits::{CommandRunner, ProjectStore, RunningProcess};
 use rustodian_storage::{ProjectLog, SqliteStore};
-use rustodian_types::ProjectId;
 
 use crate::message::{GuiMessage, MarkdownBlock, ParsedMarkdown, WorkerMessage};
 
@@ -29,7 +28,9 @@ pub fn parse_markdown(text: &str) -> ParsedMarkdown {
             continue; // The fence itself isn't a block we render directly here, or we could include it
         }
         if in_code_block {
-            blocks.push(MarkdownBlock::CodeFence { text: line.to_string() });
+            blocks.push(MarkdownBlock::CodeFence {
+                text: line.to_string(),
+            });
             continue;
         }
 
@@ -44,54 +45,79 @@ pub fn parse_markdown(text: &str) -> ParsedMarkdown {
         }
 
         if let Some(rest) = trimmed.strip_prefix("#### ") {
-            blocks.push(MarkdownBlock::Header { level: 4, text: rest.to_string() });
+            blocks.push(MarkdownBlock::Header {
+                level: 4,
+                text: rest.to_string(),
+            });
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix("### ") {
-            blocks.push(MarkdownBlock::Header { level: 3, text: rest.to_string() });
+            blocks.push(MarkdownBlock::Header {
+                level: 3,
+                text: rest.to_string(),
+            });
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix("## ") {
-            blocks.push(MarkdownBlock::Header { level: 2, text: rest.to_string() });
+            blocks.push(MarkdownBlock::Header {
+                level: 2,
+                text: rest.to_string(),
+            });
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix("# ") {
-            blocks.push(MarkdownBlock::Header { level: 1, text: rest.to_string() });
+            blocks.push(MarkdownBlock::Header {
+                level: 1,
+                text: rest.to_string(),
+            });
             continue;
         }
 
         if let Some(rest) = strip_task_prefix(trimmed, true) {
-            blocks.push(MarkdownBlock::Task { text: rest.to_string(), checked: true });
+            blocks.push(MarkdownBlock::Task {
+                text: rest.to_string(),
+                checked: true,
+            });
             continue;
         }
         if let Some(rest) = strip_task_prefix(trimmed, false) {
-            blocks.push(MarkdownBlock::Task { text: rest.to_string(), checked: false });
+            blocks.push(MarkdownBlock::Task {
+                text: rest.to_string(),
+                checked: false,
+            });
             continue;
         }
 
-        if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
-            blocks.push(MarkdownBlock::BulletList { text: rest.to_string() });
+        if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            blocks.push(MarkdownBlock::BulletList {
+                text: rest.to_string(),
+            });
             continue;
         }
 
         if let Some(dot_pos) = trimmed.find(". ") {
             let prefix = &trimmed[..dot_pos];
             if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
-                blocks.push(MarkdownBlock::NumberedList { 
-                    number: trimmed[..=dot_pos].to_string(), 
-                    text: trimmed[dot_pos + 2..].to_string() 
+                blocks.push(MarkdownBlock::NumberedList {
+                    number: trimmed[..=dot_pos].to_string(),
+                    text: trimmed[dot_pos + 2..].to_string(),
                 });
                 continue;
             }
         }
 
-        blocks.push(MarkdownBlock::Text { text: line.to_string() });
+        blocks.push(MarkdownBlock::Text {
+            text: line.to_string(),
+        });
     }
 
     ParsedMarkdown { blocks }
 }
 
-fn strip_task_prefix<'a>(line: &'a str, checked: bool) -> Option<&'a str> {
+fn strip_task_prefix(line: &str, checked: bool) -> Option<&str> {
     let patterns: &[&str] = if checked {
         &["- [x] ", "- [X] ", "* [x] ", "* [X] "]
     } else {
@@ -142,11 +168,12 @@ pub struct WorkerState {
     pub should_kill: Arc<Mutex<bool>>,
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn run_worker(
     store: Arc<SqliteStore>,
-    rx: std::sync::mpsc::Receiver<GuiMessage>,
-    tx: std::sync::mpsc::Sender<WorkerMessage>,
-    ctx: eframe::egui::Context,
+    rx: &std::sync::mpsc::Receiver<GuiMessage>,
+    tx: &std::sync::mpsc::Sender<WorkerMessage>,
+    ctx: &eframe::egui::Context,
 ) {
     let mut state = WorkerState {
         store,
@@ -162,7 +189,12 @@ pub fn run_worker(
                 let _ = tx.send(WorkerMessage::ProjectsLoaded(res));
                 ctx.request_repaint();
             }
-            GuiMessage::RunCommand { project_id, project_path, command_name, command_str } => {
+            GuiMessage::RunCommand {
+                project_id,
+                project_path,
+                command_name,
+                command_str,
+            } => {
                 // Kill any existing process first
                 if let Some(mut proc) = state.running_process.take() {
                     let _ = proc.kill();
@@ -199,38 +231,32 @@ pub fn run_worker(
                         state.running_process = Some(child);
 
                         let stdout_log = log_buffer.clone();
-                        let stdout_ctx = ctx.clone();
                         let mut stdout_handle = None;
-                        
+
                         if let Some(so) = stdout {
                             stdout_handle = Some(thread::spawn(move || {
                                 use std::io::{BufRead, BufReader};
                                 let reader = BufReader::new(so);
-                                for line in reader.lines() {
-                                    if let Ok(l) = line {
-                                        stdout_log.push_line(l);
-                                    }
+                                for line in reader.lines().map_while(Result::ok) {
+                                    stdout_log.push_line(line);
                                 }
                             }));
                         }
 
                         let stderr_log = log_buffer.clone();
-                        let stderr_ctx = ctx.clone();
                         let mut stderr_handle = None;
-                        
+
                         if let Some(se) = stderr {
                             stderr_handle = Some(thread::spawn(move || {
                                 use std::io::{BufRead, BufReader};
                                 let reader = BufReader::new(se);
-                                for line in reader.lines() {
-                                    if let Ok(l) = line {
-                                        stderr_log.push_line(l);
-                                    }
+                                for line in reader.lines().map_while(Result::ok) {
+                                    stderr_log.push_line(line);
                                 }
                             }));
                         }
-                        
-                        // We need to spawn another thread to wait for the process to finish, 
+
+                        // We need to spawn another thread to wait for the process to finish,
                         // so we don't block the worker loop which needs to process KillCommand
                         let is_running_clone = state.is_running.clone();
                         let tx_clone = tx.clone();
@@ -238,12 +264,16 @@ pub fn run_worker(
                         let cmd_name = command_name.clone();
                         let ctx_clone = ctx.clone();
                         let should_kill_clone = state.should_kill.clone();
-                        
+
                         // Wait thread
                         thread::spawn(move || {
                             // Wait for streams to finish reading
-                            if let Some(h) = stdout_handle { let _ = h.join(); }
-                            if let Some(h) = stderr_handle { let _ = h.join(); }
+                            if let Some(h) = stdout_handle {
+                                let _ = h.join();
+                            }
+                            if let Some(h) = stderr_handle {
+                                let _ = h.join();
+                            }
 
                             let mut exit_code = None;
                             let killed = *should_kill_clone.lock().unwrap();
@@ -253,7 +283,7 @@ pub fn run_worker(
                             }
 
                             let full_log = log_buffer_clone.snapshot();
-                            
+
                             // Save to database
                             let log_record = ProjectLog {
                                 id: uuid::Uuid::new_v4().to_string(),
@@ -268,7 +298,11 @@ pub fn run_worker(
                             let _ = tx_clone.send(WorkerMessage::CommandStatus {
                                 command_name: cmd_name,
                                 is_running: false,
-                                exit_status: Some(if killed { "killed".to_string() } else { "finished".to_string() }),
+                                exit_status: Some(if killed {
+                                    "killed".to_string()
+                                } else {
+                                    "finished".to_string()
+                                }),
                                 log_buffer: log_buffer_clone,
                             });
                             *is_running_clone.lock().unwrap() = false;
@@ -307,9 +341,8 @@ pub fn run_worker(
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
                 let last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
                 let parsed = parse_markdown(&content);
-                
+
                 let _ = tx.send(WorkerMessage::DocLoaded {
-                    path,
                     content,
                     parsed,
                     last_modified,

@@ -70,10 +70,7 @@ impl LogBuffer {
     /// Return the number of lines currently in the buffer.
     #[must_use]
     pub fn line_count(&self) -> usize {
-        self.inner
-            .lock()
-            .map(|inner| inner.lines.len())
-            .unwrap_or(0)
+        self.inner.lock().map_or(0, |inner| inner.lines.len())
     }
 
     /// Drain all lines from the buffer and return them joined by newlines.
