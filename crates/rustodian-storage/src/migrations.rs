@@ -106,6 +106,24 @@ pub fn run_migrations(conn: &Connection) -> Result<(), StorageError> {
         .map_err(StorageError::Sqlite)?;
     }
 
+    let applied_004: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM _migrations WHERE id = 4",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::Sqlite)?;
+    if !applied_004 {
+        info!("Applying migration 004: settings table");
+        conn.execute_batch(MIGRATION_004)
+            .map_err(StorageError::Sqlite)?;
+        conn.execute(
+            "INSERT INTO _migrations (id, name) VALUES (4, 'settings_table')",
+            [],
+        )
+        .map_err(StorageError::Sqlite)?;
+    }
+
     info!("Migrations complete");
     Ok(())
 }
@@ -127,4 +145,11 @@ CREATE TABLE IF NOT EXISTS project_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_logs_project ON project_logs(project_id, run_at DESC);
+";
+
+const MIGRATION_004: &str = r"
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 ";

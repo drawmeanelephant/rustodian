@@ -36,6 +36,7 @@ custom-cmd = "echo hello world"
     let mut cmd = Command::cargo_bin("rustodian").unwrap();
     cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
         .arg("scan")
+        .arg("--path")
         .arg(dir.path());
     cmd.assert()
         .success()

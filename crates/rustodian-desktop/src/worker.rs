@@ -369,6 +369,29 @@ pub fn run_worker(
                 }
                 ctx.request_repaint();
             }
+            GuiMessage::ScanProjects { path } => {
+                let scanner = rustodian_scanner::FsScanner;
+                let git = rustodian_git::Git2Inspector;
+                let runner = rustodian_core::runner::DefaultCommandRunner;
+                let custodian = rustodian_core::Custodian::new(
+                    Box::new((*state.store).clone()),
+                    Box::new(scanner),
+                    Box::new(git),
+                    Box::new(runner),
+                );
+                let res = custodian
+                    .scan(&path, &rustodian_types::ScanConfig::default())
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(WorkerMessage::ScanComplete(res));
+                let list_res = state.store.list_projects().map_err(|e| e.to_string());
+                let _ = tx.send(WorkerMessage::ProjectsLoaded(list_res));
+                ctx.request_repaint();
+            }
+
+            GuiMessage::SaveSetting { key, value } => {
+                let _ = state.store.set_setting(&key, &value);
+            }
+
             GuiMessage::LoadDocContent { path, known_hash } => {
                 let content = fs::read_to_string(&path)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
