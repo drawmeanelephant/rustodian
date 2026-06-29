@@ -56,24 +56,18 @@ cargo install --path crates/rustodian-cli
 
 - Rust 1.85+ (edition 2024)
 
-## Using with LLMs / RAG Context
+## Environment Variables
 
-Rustodian provides a built-in xtask to export your entire codebase into AI-friendly markdown files, perfect for RAG (Retrieval-Augmented Generation) or large context windows.
+Rustodian supports the following environment variables to configure its behavior:
 
-Follow these 3 simple steps to generate context:
+- `RUSTODIAN_DB`: Specifies the absolute path to the SQLite database file. If not set, it defaults to `~/.local/share/rustodian/rustodian.db` (or the equivalent data directory for your OS).
+- `RUSTODIAN_SCAN_ROOT`: Specifies the default root directory for the `scan` command if no path is provided.
 
-1. **Set your paths** (navigate to the project you want to export).
-2. **Run `just run scan .`** to build the initial project index.
-3. **Run `cargo xtask export-rag`** to compile context assets into the `/rag_export` folder.
+Add the following to your `~/.bashrc` or `~/.zshrc` for reproducible setups:
 
-**Sample Prompt Snippet:**
-
-```markdown
-I have exported the relevant context of my codebase.
-Please review the files in the `rag_export` directory (provided below)
-and help me implement [Feature X / Fix Bug Y].
-
-<Paste contents of rag_export files here>
+```bash
+export RUSTODIAN_DB="$HOME/.config/rustodian/rustodian.db"
+export RUSTODIAN_SCAN_ROOT="$HOME/projects"
 ```
 
 ## Architecture
