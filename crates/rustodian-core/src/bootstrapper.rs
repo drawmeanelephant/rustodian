@@ -158,7 +158,7 @@ impl<'a> ProjectBootstrapper<'a> {
         };
 
         if path.join("requirements.txt").exists() {
-            let install_cmd = format!("{} install -r requirements.txt", pip_path);
+            let install_cmd = format!("{pip_path} install -r requirements.txt");
             self.custodian.run_and_log_command(
                 project,
                 "bootstrap:python_deps",
@@ -168,7 +168,7 @@ impl<'a> ProjectBootstrapper<'a> {
             )?;
         }
         if path.join("pyproject.toml").exists() || path.join("setup.py").exists() {
-            let install_cmd = format!("{} install .", pip_path);
+            let install_cmd = format!("{pip_path} install .");
             self.custodian.run_and_log_command(
                 project,
                 "bootstrap:python_deps",
@@ -191,9 +191,9 @@ impl<'a> ProjectBootstrapper<'a> {
         };
 
         let test_cmd = if path.join(pytest_path).exists() || Path::new(pytest_path).exists() {
-            format!("{} -v", pytest_path)
+            format!("{pytest_path} -v")
         } else {
-            format!("{} -m unittest discover", python_path)
+            format!("{python_path} -m unittest discover")
         };
 
         tracing::info!("Verifying Python project: {}", project.name);

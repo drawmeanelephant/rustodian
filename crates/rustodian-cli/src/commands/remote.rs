@@ -98,7 +98,7 @@ pub fn execute_refresh(
                                 println!("Could not find the project in database by path: {}", project_dest.display());
                             }
                             Err(e) => {
-                                println!("Failed to query project by path: {}", e);
+                                println!("Failed to query project by path: {e}");
                             }
                         }
                     }

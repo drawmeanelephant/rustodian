@@ -45,7 +45,7 @@ impl SqliteStore {
     pub fn open_in_memory() -> Result<Self, StorageError> {
         debug!("Opening in-memory database pool");
         let uuid = uuid::Uuid::new_v4().to_string();
-        let db_url = format!("file:{}?mode=memory&cache=shared", uuid);
+        let db_url = format!("file:{uuid}?mode=memory&cache=shared");
         let manager = SqliteConnectionManager::file(&db_url)
             .with_init(|c| {
                 c.execute_batch("
