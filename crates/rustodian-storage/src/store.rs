@@ -445,6 +445,33 @@ impl ProjectStore for SqliteStore {
     }
 }
 
+impl SqliteStore {
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, CoreError> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn
+            .prepare("SELECT value FROM settings WHERE key = ?1")
+            .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
+
+        let value: Option<String> = stmt
+            .query_row(params![key], |row| row.get(0))
+            .optional()
+            .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
+
+        Ok(value)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
+        let conn = self.get_conn()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
+            params![key, value],
+        )
+        .map_err(|e| CoreError::Storage(format!("insert error: {e}")))?;
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

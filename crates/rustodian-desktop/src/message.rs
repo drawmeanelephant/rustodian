@@ -19,15 +19,28 @@ pub enum GuiMessage {
         use_shell: bool,
     },
     /// Kill the currently running command (if any).
+    /// Request to scan projects.
+    ScanProjects {
+        path: PathBuf,
+    },
+
     KillCommand,
     /// Discover documentation files in a project root.
-    DiscoverDocs { project_path: PathBuf },
+    DiscoverDocs {
+        project_path: PathBuf,
+    },
     /// Check if a specific document file is fresh.
     CheckDocFreshness {
         path: PathBuf,
         known_mtime: Option<SystemTime>,
     },
     /// Load the content of a specific document file.
+    /// Save a setting to the database.
+    SaveSetting {
+        key: String,
+        value: String,
+    },
+
     LoadDocContent {
         path: PathBuf,
         known_hash: Option<u64>,
@@ -56,6 +69,9 @@ pub struct ParsedMarkdown {
 /// Messages sent from the Background Worker thread to the GUI thread.
 pub enum WorkerMessage {
     /// Result of loading projects.
+    /// Result of scanning projects.
+    ScanComplete(Result<rustodian_core::custodian::ScanReport, String>),
+
     ProjectsLoaded(Result<Vec<Project>, String>),
 
     /// Status update for a running command.

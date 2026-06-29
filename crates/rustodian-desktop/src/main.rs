@@ -35,13 +35,24 @@ fn main() -> eframe::Result {
             let (worker_tx, gui_rx) = std::sync::mpsc::channel();
 
             let ctx_clone = cc.egui_ctx.clone();
+            let store_clone = store.clone();
             std::thread::spawn(move || {
-                worker::run_worker(store, &worker_rx, &worker_tx, &ctx_clone);
+                worker::run_worker(store_clone, &worker_rx, &worker_tx, &ctx_clone);
             });
+
+            let default_scan_root = dirs::home_dir()
+                .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().to_string());
+            let scan_root_input = store
+                .get_setting("scan_root")
+                .ok()
+                .flatten()
+                .unwrap_or(default_scan_root);
 
             let mut app = RustodianApp {
                 worker_tx: Some(gui_tx),
                 worker_rx: Some(gui_rx),
+                scan_root_input,
+
                 ..Default::default()
             };
             app.load_projects();
@@ -79,6 +90,9 @@ struct DocCache {
 #[derive(Default)]
 struct RustodianApp {
     selected_tab: Tab,
+    scan_root_input: String,
+    scan_status: Option<String>,
+
     selected_project: Option<Project>,
     projects: Vec<Project>,
     db_error: Option<String>,
@@ -197,6 +211,16 @@ impl RustodianApp {
                     self.projects = p;
                     self.db_error = None;
                 }
+                WorkerMessage::ScanComplete(Ok(report)) => {
+                    self.scan_status = Some(format!(
+                        "Scan finished: {} found, {} new, {} updated.",
+                        report.projects_found, report.projects_new, report.projects_updated
+                    ));
+                }
+                WorkerMessage::ScanComplete(Err(e)) => {
+                    self.scan_status = Some(format!("Scan failed: {e}"));
+                }
+
                 WorkerMessage::ProjectsLoaded(Err(e)) => {
                     self.db_error = Some(format!("Failed to load projects: {e}"));
                 }
@@ -294,6 +318,33 @@ impl eframe::App for RustodianApp {
             .min_size(200.0)
             .show(ui, |ui| {
                 ui.heading("🏛️ Projects");
+                ui.horizontal(|ui| {
+                    ui.label("Root:");
+                    ui.text_edit_singleline(&mut self.scan_root_input);
+                    if ui.button("Browse...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.scan_root_input = path.to_string_lossy().to_string();
+                        }
+                    }
+                });
+                if ui.button("Scan").clicked() {
+                    let path = std::path::PathBuf::from(&self.scan_root_input);
+                    self.send(GuiMessage::ScanProjects { path: path.clone() });
+                    self.scan_status = Some("Scanning...".to_string());
+                    if let Some(tx) = &self.worker_tx {
+                        let _ = tx.send(GuiMessage::SaveSetting {
+                            key: "scan_root".to_string(),
+                            value: self.scan_root_input.clone(),
+                        });
+                    }
+                    // Since worker does the scan, we can just let worker do it, or we do it here.
+                    // Actually, let's just trigger the scan.
+                }
+                if let Some(status) = &self.scan_status {
+                    ui.label(status);
+                }
+                ui.separator();
+
                 ui.separator();
 
                 if let Some(err) = &self.db_error {

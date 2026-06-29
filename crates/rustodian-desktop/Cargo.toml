@@ -22,6 +22,10 @@ uuid.workspace = true
 chrono.workspace = true
 eframe = "0.35.0"
 ahash = "0.8.12"
+dirs = "6.0.0"
+rfd = "0.17.2"
+rustodian-scanner.workspace = true
+rustodian-git.workspace = true
 
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
 //! # Rustodian CLI
+
 //!
 //! Department of Project Custodianship 🏛️
 //!
@@ -55,7 +56,7 @@ enum Commands {
     /// Scan a directory tree for software projects
     Scan {
         /// Root directory to scan
-        #[arg(default_value = ".")]
+        #[arg(short, long, env = "RUSTODIAN_SCAN_ROOT", default_value = ".")]
         path: PathBuf,
 
         /// Maximum directory depth
