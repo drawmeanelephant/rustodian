@@ -38,9 +38,9 @@ pub struct StatusReport {
 /// This is the primary API surface for any frontend (CLI, GUI, etc.).
 pub struct Custodian {
     store: Box<dyn ProjectStore>,
-    #[allow(dead_code)]
+
     scanner: Box<dyn ProjectScanner>,
-    #[allow(dead_code)]
+
     git: Box<dyn GitInspector>,
     runner: Box<dyn CommandRunner>,
 }
@@ -142,7 +142,13 @@ impl Custodian {
                 ))
             })?;
 
-        self.run_and_log_command(&project, command_name, &cmd.command, cmd.use_shell, HashMap::new())?;
+        self.run_and_log_command(
+            &project,
+            command_name,
+            &cmd.command,
+            cmd.use_shell,
+            HashMap::new(),
+        )?;
         Ok(())
     }
 

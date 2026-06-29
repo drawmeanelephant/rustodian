@@ -9,7 +9,9 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 use rustodian_core::CoreError;
 use rustodian_core::traits::ProjectStore;
-use rustodian_types::{Project, ProjectId, ProjectLog, ProjectMetadata, ScanId, ScanRecord, ScanStatus};
+use rustodian_types::{
+    Project, ProjectId, ProjectLog, ProjectMetadata, ScanId, ScanRecord, ScanStatus,
+};
 
 use crate::error::StorageError;
 use crate::migrations;
@@ -26,13 +28,14 @@ impl SqliteStore {
     /// Open or create a database at the given path.
     pub fn open(path: &Path) -> Result<Self, StorageError> {
         debug!(path = %path.display(), "Opening database pool");
-        let manager = SqliteConnectionManager::file(path)
-            .with_init(|c| {
-                c.execute_batch("
+        let manager = SqliteConnectionManager::file(path).with_init(|c| {
+            c.execute_batch(
+                "
                     PRAGMA journal_mode = WAL;
                     PRAGMA foreign_keys = ON;
-                ")
-            });
+                ",
+            )
+        });
         let pool = r2d2::Pool::new(manager)
             .map_err(|e| StorageError::Migration(format!("failed to create database pool: {e}")))?;
 
@@ -45,18 +48,21 @@ impl SqliteStore {
     pub fn open_in_memory() -> Result<Self, StorageError> {
         debug!("Opening in-memory database pool");
         let uuid = uuid::Uuid::new_v4().to_string();
-        let db_url = format!("file:{}?mode=memory&cache=shared", uuid);
-        let manager = SqliteConnectionManager::file(&db_url)
-            .with_init(|c| {
-                c.execute_batch("
+        let db_url = format!("file:{uuid}?mode=memory&cache=shared");
+        let manager = SqliteConnectionManager::file(&db_url).with_init(|c| {
+            c.execute_batch(
+                "
                     PRAGMA journal_mode = WAL;
                     PRAGMA foreign_keys = ON;
-                ")
-            });
+                ",
+            )
+        });
         let pool = r2d2::Pool::builder()
             .max_size(1)
             .build(manager)
-            .map_err(|e| StorageError::Migration(format!("failed to create in-memory pool: {e}")))?;
+            .map_err(|e| {
+                StorageError::Migration(format!("failed to create in-memory pool: {e}"))
+            })?;
 
         Ok(Self {
             pool: std::sync::Arc::new(pool),
@@ -65,7 +71,9 @@ impl SqliteStore {
 
     /// Run all pending database migrations.
     pub fn migrate(&self) -> Result<(), StorageError> {
-        let conn = self.get_conn().map_err(|e| StorageError::Migration(e.to_string()))?;
+        let conn = self
+            .get_conn()
+            .map_err(|e| StorageError::Migration(e.to_string()))?;
         migrations::run_migrations(&conn)
     }
 
@@ -84,7 +92,9 @@ impl SqliteStore {
     }
 
     /// Get a pooled connection from the pool.
-    pub(crate) fn get_conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, CoreError> {
+    pub(crate) fn get_conn(
+        &self,
+    ) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, CoreError> {
         self.pool
             .get()
             .map_err(|e| CoreError::Storage(format!("failed to get database connection: {e}")))
@@ -129,23 +139,42 @@ fn parse_project_row(
         })
         .transpose()?;
 
-    let meta_json: serde_json::Value = serde_json::from_str(meta_str)
-        .map_err(|e| CoreError::Storage(format!("invalid metadata JSON for project '{name}': {e}")))?;
+    let meta_json: serde_json::Value = serde_json::from_str(meta_str).map_err(|e| {
+        CoreError::Storage(format!("invalid metadata JSON for project '{name}': {e}"))
+    })?;
 
-    let meta_val = meta_json.get("meta")
-        .ok_or_else(|| CoreError::Storage(format!("metadata JSON for project '{name}' missing 'meta' field")))?;
-    let metadata: ProjectMetadata = serde_json::from_value(meta_val.clone())
-        .map_err(|e| CoreError::Storage(format!("failed to deserialize ProjectMetadata for project '{name}': {e}")))?;
+    let meta_val = meta_json.get("meta").ok_or_else(|| {
+        CoreError::Storage(format!(
+            "metadata JSON for project '{name}' missing 'meta' field"
+        ))
+    })?;
+    let metadata: ProjectMetadata = serde_json::from_value(meta_val.clone()).map_err(|e| {
+        CoreError::Storage(format!(
+            "failed to deserialize ProjectMetadata for project '{name}': {e}"
+        ))
+    })?;
 
-    let vcs_val = meta_json.get("vcs")
-        .ok_or_else(|| CoreError::Storage(format!("metadata JSON for project '{name}' missing 'vcs' field")))?;
-    let vcs = serde_json::from_value(vcs_val.clone())
-        .map_err(|e| CoreError::Storage(format!("failed to deserialize VCS metadata for project '{name}': {e}")))?;
+    let vcs_val = meta_json.get("vcs").ok_or_else(|| {
+        CoreError::Storage(format!(
+            "metadata JSON for project '{name}' missing 'vcs' field"
+        ))
+    })?;
+    let vcs = serde_json::from_value(vcs_val.clone()).map_err(|e| {
+        CoreError::Storage(format!(
+            "failed to deserialize VCS metadata for project '{name}': {e}"
+        ))
+    })?;
 
-    let lang_val = meta_json.get("languages")
-        .ok_or_else(|| CoreError::Storage(format!("metadata JSON for project '{name}' missing 'languages' field")))?;
-    let languages = serde_json::from_value(lang_val.clone())
-        .map_err(|e| CoreError::Storage(format!("failed to deserialize languages metadata for project '{name}': {e}")))?;
+    let lang_val = meta_json.get("languages").ok_or_else(|| {
+        CoreError::Storage(format!(
+            "metadata JSON for project '{name}' missing 'languages' field"
+        ))
+    })?;
+    let languages = serde_json::from_value(lang_val.clone()).map_err(|e| {
+        CoreError::Storage(format!(
+            "failed to deserialize languages metadata for project '{name}': {e}"
+        ))
+    })?;
 
     Ok(Project {
         id,

@@ -209,7 +209,7 @@ mod tests {
             exclude_patterns: vec![],
         };
         let projs = scanner.scan(root, &config).unwrap();
-        
+
         // It should only find "parent_proj" and skip descending into "nested_node_proj"
         assert_eq!(projs.len(), 1);
         assert_eq!(projs[0].name, "parent_proj");
