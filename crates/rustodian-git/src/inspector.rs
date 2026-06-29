@@ -17,7 +17,9 @@ impl Git2Inspector {
     pub fn get_dirty_files(&self, repo: &Repository) -> Result<Vec<std::path::PathBuf>, CoreError> {
         let mut status_opts = StatusOptions::new();
         status_opts.include_untracked(true);
-        let statuses = repo.statuses(Some(&mut status_opts)).map_err(|e| CoreError::Git(e.to_string()))?;
+        let statuses = repo
+            .statuses(Some(&mut status_opts))
+            .map_err(|e| CoreError::Git(e.to_string()))?;
 
         let mut dirty_files = Vec::new();
         for entry in statuses.iter() {
@@ -56,8 +58,7 @@ impl GitInspector for Git2Inspector {
 
         let is_dirty = self
             .get_dirty_files(&repo)
-            .map(|files| !files.is_empty())
-            .unwrap_or(false);
+            .is_ok_and(|files| !files.is_empty());
 
         let last_commit = match repo.head().and_then(|head| head.peel_to_commit()) {
             Ok(commit) => {
