@@ -142,7 +142,13 @@ impl Custodian {
                 ))
             })?;
 
-        self.run_and_log_command(&project, command_name, &cmd.command, cmd.use_shell, HashMap::new())?;
+        self.run_and_log_command(
+            &project,
+            command_name,
+            &cmd.command,
+            cmd.use_shell,
+            HashMap::new(),
+        )?;
         Ok(())
     }
 

@@ -27,12 +27,13 @@ impl RemoteProjectStore for SqliteStore {
             .query_map([], |row| {
                 let repo_slug: String = row.get(0)?;
                 let patterns_json: String = row.get(1)?;
-                let preserve_patterns = serde_json::from_str(&patterns_json)
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                let preserve_patterns = serde_json::from_str(&patterns_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
                         0,
                         rusqlite::types::Type::Text,
-                        Box::new(e)
-                    ))?;
+                        Box::new(e),
+                    )
+                })?;
                 Ok(RemoteProject {
                     repo_slug,
                     preserve_patterns,
