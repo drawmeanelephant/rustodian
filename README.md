@@ -56,6 +56,20 @@ cargo install --path crates/rustodian-cli
 
 - Rust 1.85+ (edition 2024)
 
+## Environment Variables
+
+Rustodian supports the following environment variables to configure its behavior:
+
+- `RUSTODIAN_DB`: Specifies the absolute path to the SQLite database file. If not set, it defaults to `~/.local/share/rustodian/rustodian.db` (or the equivalent data directory for your OS).
+- `RUSTODIAN_SCAN_ROOT`: Specifies the default root directory for the `scan` command if no path is provided.
+
+Add the following to your `~/.bashrc` or `~/.zshrc` for reproducible setups:
+
+```bash
+export RUSTODIAN_DB="$HOME/.config/rustodian/rustodian.db"
+export RUSTODIAN_SCAN_ROOT="$HOME/projects"
+```
+
 ## Architecture
 
 Rustodian is built as a Cargo workspace with strict crate boundaries:

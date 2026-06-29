@@ -60,6 +60,8 @@ impl std::fmt::Display for ScanStatus {
     }
 }
 
+pub const DEFAULT_MAX_DEPTH: usize = 5;
+
 /// Configuration for a scan operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanConfig {
@@ -74,7 +76,7 @@ pub struct ScanConfig {
 impl Default for ScanConfig {
     fn default() -> Self {
         Self {
-            max_depth: 5,
+            max_depth: DEFAULT_MAX_DEPTH,
             exclude_patterns: Vec::new(),
             follow_symlinks: false,
         }
