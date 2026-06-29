@@ -280,7 +280,8 @@ impl RustodianApp {
 
 impl eframe::App for RustodianApp {
     #[allow(clippy::too_many_lines)]
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         self.process_messages();
 
         // Throttle repaints slightly to not hog CPU when streaming logs
@@ -288,10 +289,10 @@ impl eframe::App for RustodianApp {
             ctx.request_repaint_after(Duration::from_millis(32));
         }
 
-        egui::SidePanel::left("projects_panel")
+        egui::Panel::left("projects_panel")
             .resizable(true)
-            .min_width(200.0)
-            .show(ctx, |ui| {
+            .min_size(200.0)
+            .show(ui, |ui| {
                 ui.heading("🏛️ Projects");
                 ui.separator();
 
@@ -335,7 +336,7 @@ impl eframe::App for RustodianApp {
                 }
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             if let Some(project) = &self.selected_project {
                 ui.horizontal(|ui| {
                     ui.heading(&project.name);
@@ -391,7 +392,7 @@ impl eframe::App for RustodianApp {
                         self.render_tasks_tab(ui);
                     }
                     Tab::RunnerLogs => {
-                        self.render_runner_logs(ui, ctx);
+                        self.render_runner_logs(ui, &ctx);
                     }
                 }
             } else {
