@@ -60,7 +60,7 @@ enum Commands {
         path: PathBuf,
 
         /// Maximum directory depth
-        #[arg(long, default_value = "5")]
+        #[arg(long, default_value_t = rustodian_types::scan::DEFAULT_MAX_DEPTH)]
         max_depth: usize,
     },
 

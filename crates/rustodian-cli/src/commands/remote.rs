@@ -79,7 +79,7 @@ pub fn execute_refresh(
                 println!("Successfully refreshed {}", project.repo_slug);
                 println!("Scanning project {}...", project.repo_slug);
                 let scan_config = ScanConfig {
-                    max_depth: 3,
+                    max_depth: rustodian_types::scan::DEFAULT_MAX_DEPTH,
                     follow_symlinks: false,
                     exclude_patterns: vec![],
                 };
