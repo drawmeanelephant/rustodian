@@ -13,6 +13,22 @@ use rustodian_types::{CommitInfo, VcsInfo, VcsType};
 #[derive(Debug, Default)]
 pub struct Git2Inspector;
 
+impl Git2Inspector {
+    pub fn get_dirty_files(&self, repo: &Repository) -> Result<Vec<std::path::PathBuf>, CoreError> {
+        let mut status_opts = StatusOptions::new();
+        status_opts.include_untracked(true);
+        let statuses = repo.statuses(Some(&mut status_opts)).map_err(|e| CoreError::Git(e.to_string()))?;
+
+        let mut dirty_files = Vec::new();
+        for entry in statuses.iter() {
+            if let Ok(path) = entry.path() {
+                dirty_files.push(std::path::PathBuf::from(path));
+            }
+        }
+        Ok(dirty_files)
+    }
+}
+
 impl GitInspector for Git2Inspector {
     #[instrument(skip(self), fields(path = %project_path.display()))]
     fn inspect(&self, project_path: &Path) -> Result<Option<VcsInfo>, CoreError> {
@@ -38,12 +54,10 @@ impl GitInspector for Git2Inspector {
             .ok()
             .and_then(|r| r.url().ok().map(std::string::ToString::to_string));
 
-        let mut status_opts = StatusOptions::new();
-        status_opts.include_untracked(true);
-        let is_dirty = match repo.statuses(Some(&mut status_opts)) {
-            Ok(statuses) => !statuses.is_empty(),
-            Err(_) => false,
-        };
+        let is_dirty = self
+            .get_dirty_files(&repo)
+            .map(|files| !files.is_empty())
+            .unwrap_or(false);
 
         let last_commit = match repo.head().and_then(|head| head.peel_to_commit()) {
             Ok(commit) => {

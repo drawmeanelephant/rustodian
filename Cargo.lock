@@ -3659,6 +3659,7 @@ dependencies = [
 name = "rustodian-git"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "git2",
  "rustodian-core",
