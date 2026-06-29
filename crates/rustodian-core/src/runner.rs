@@ -106,7 +106,8 @@ impl RunningProcess for DefaultRunningProcess {
     }
 
     fn wait(&mut self) -> Result<Option<i32>, CoreError> {
-        let status = self.child
+        let status = self
+            .child
             .wait()
             .map_err(|e| CoreError::Storage(format!("Failed to wait for process: {e}")))?;
         Ok(status.code())

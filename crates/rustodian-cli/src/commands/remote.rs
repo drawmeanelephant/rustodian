@@ -64,7 +64,7 @@ pub fn execute_refresh(
     }
     let downloader = GithubDownloader::new();
     let rt = Runtime::new().context("failed to create tokio runtime")?;
-    
+
     for project in projects {
         println!("Refreshing {}...", project.repo_slug);
         let project_dest = dest_dir.join(&project.repo_slug);
@@ -90,15 +90,24 @@ pub fn execute_refresh(
                             Ok(Some(proj)) => {
                                 println!("Bootstrapping and verifying project {}...", proj.name);
                                 match custodian.bootstrap_and_verify(&proj.id) {
-                                    Ok(()) => println!("Successfully bootstrapped and verified {}!", proj.name),
-                                    Err(e) => println!("Failed to bootstrap and verify {}: {}", proj.name, e),
+                                    Ok(()) => println!(
+                                        "Successfully bootstrapped and verified {}!",
+                                        proj.name
+                                    ),
+                                    Err(e) => println!(
+                                        "Failed to bootstrap and verify {}: {}",
+                                        proj.name, e
+                                    ),
                                 }
                             }
                             Ok(None) => {
-                                println!("Could not find the project in database by path: {}", project_dest.display());
+                                println!(
+                                    "Could not find the project in database by path: {}",
+                                    project_dest.display()
+                                );
                             }
                             Err(e) => {
-                                println!("Failed to query project by path: {}", e);
+                                println!("Failed to query project by path: {e}");
                             }
                         }
                     }
