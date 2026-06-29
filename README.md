@@ -56,6 +56,26 @@ cargo install --path crates/rustodian-cli
 
 - Rust 1.85+ (edition 2024)
 
+## Using with LLMs / RAG Context
+
+Rustodian provides a built-in xtask to export your entire codebase into AI-friendly markdown files, perfect for RAG (Retrieval-Augmented Generation) or large context windows.
+
+Follow these 3 simple steps to generate context:
+
+1. **Set your paths** (navigate to the project you want to export).
+2. **Run `just run scan .`** to build the initial project index.
+3. **Run `cargo xtask export-rag`** to compile context assets into the `/rag_export` folder.
+
+**Sample Prompt Snippet:**
+
+```markdown
+I have exported the relevant context of my codebase.
+Please review the files in the `rag_export` directory (provided below)
+and help me implement [Feature X / Fix Bug Y].
+
+<Paste contents of rag_export files here>
+```
+
 ## Architecture
 
 Rustodian is built as a Cargo workspace with strict crate boundaries:
