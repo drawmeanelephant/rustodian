@@ -1,0 +1,16 @@
+---
+source: crates/rustodian-desktop/src/markdown.rs
+expression: parse_markdown(input)
+---
+ParsedMarkdown {
+    blocks: [
+        Task {
+            text: "task one",
+            checked: false,
+        },
+        Task {
+            text: "task two",
+            checked: true,
+        },
+    ],
+}

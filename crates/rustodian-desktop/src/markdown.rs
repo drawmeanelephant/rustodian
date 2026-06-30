@@ -115,3 +115,20 @@ fn strip_task_prefix(line: &str, checked: bool) -> Option<&str> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_markdown_tasks() {
+        let input = "- [ ] task one\n- [x] task two\n";
+        insta::assert_debug_snapshot!(parse_markdown(input));
+    }
+
+    #[test]
+    fn test_parse_markdown_commands() {
+        let input = "## Commands\n```\ncargo test\n```\n";
+        insta::assert_debug_snapshot!(parse_markdown(input));
+    }
+}

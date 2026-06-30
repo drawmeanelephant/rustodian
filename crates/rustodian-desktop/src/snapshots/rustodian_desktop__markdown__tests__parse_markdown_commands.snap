@@ -1,0 +1,15 @@
+---
+source: crates/rustodian-desktop/src/markdown.rs
+expression: parse_markdown(input)
+---
+ParsedMarkdown {
+    blocks: [
+        Header {
+            level: 2,
+            text: "Commands",
+        },
+        CodeFence {
+            text: "cargo test",
+        },
+    ],
+}
