@@ -72,8 +72,7 @@ impl GitInspector for Git2Inspector {
     }
 
     fn get_dirty_files(&self, project_path: &Path) -> Result<Vec<std::path::PathBuf>, CoreError> {
-        let repo = Repository::open(project_path)
-            .map_err(|e| CoreError::Git(e.to_string()))?;
+        let repo = Repository::open(project_path).map_err(|e| CoreError::Git(e.to_string()))?;
 
         let mut status_opts = StatusOptions::new();
         status_opts.include_untracked(true);

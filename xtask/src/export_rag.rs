@@ -42,7 +42,7 @@ pub fn export_rag(dirty_only: bool) {
     // ── Optional dirty-file filter ────────────────────────────────────────
     let dirty_filter: Option<HashSet<std::path::PathBuf>> = if dirty_only {
         use rustodian_core::traits::GitInspector;
-        let inspector = rustodian_git::Git2Inspector::default();
+        let inspector = rustodian_git::Git2Inspector;
         match inspector.get_dirty_files(Path::new(".")) {
             Ok(files) => {
                 let set: HashSet<_> = files

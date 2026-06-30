@@ -16,14 +16,14 @@ use crate::error::CoreError;
 
 /// Well-known artifact directories that are safe to remove.
 const CRUFT_TARGETS: &[&str] = &[
-    "target",        // Rust
-    "node_modules",  // Node / JS
-    ".venv",         // Python virtualenv
-    ".gopath",       // Go (Rustodian-isolated)
-    ".next",         // Next.js
-    "dist",          // Generic build output
-    "build",         // Generic build output
-    "__pycache__",   // Python bytecode cache
+    "target",       // Rust
+    "node_modules", // Node / JS
+    ".venv",        // Python virtualenv
+    ".gopath",      // Go (Rustodian-isolated)
+    ".next",        // Next.js
+    "dist",         // Generic build output
+    "build",        // Generic build output
+    "__pycache__",  // Python bytecode cache
 ];
 
 /// Result of a janitor inspection or clean operation.
@@ -61,28 +61,23 @@ impl<'a> DigitalJanitor<'a> {
             let path = project.path.join(target);
             if path.exists() && path.is_dir() {
                 let size = dir_size(&path).unwrap_or(0);
-                info!(
-                    target,
-                    size_bytes = size,
-                    "Found artifact directory"
-                );
+                info!(target, size_bytes = size, "Found artifact directory");
 
                 bytes_reclaimed += size;
                 targets_found.push(target.to_string());
 
-                if !dry_run {
-                    if let Err(e) = fs::remove_dir_all(&path) {
-                        warn!(
-                            target,
-                            error = %e,
-                            "Failed to remove artifact directory"
-                        );
-                    }
+                if !dry_run && let Err(e) = fs::remove_dir_all(&path) {
+                    warn!(
+                        target,
+                        error = %e,
+                        "Failed to remove artifact directory"
+                    );
                 }
             }
         }
 
         if !dry_run && !targets_found.is_empty() {
+            #[allow(clippy::cast_precision_loss)]
             let log_text = format!(
                 "Digital Janitor: purged {:?}. Reclaimed {} bytes ({:.2} MB).",
                 targets_found,

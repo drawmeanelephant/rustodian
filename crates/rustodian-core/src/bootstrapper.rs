@@ -331,7 +331,10 @@ mod tests {
         fn inspect(&self, _path: &Path) -> Result<Option<rustodian_types::VcsInfo>, CoreError> {
             Ok(None)
         }
-        fn get_dirty_files(&self, _project_path: &Path) -> Result<Vec<std::path::PathBuf>, CoreError> {
+        fn get_dirty_files(
+            &self,
+            _project_path: &Path,
+        ) -> Result<Vec<std::path::PathBuf>, CoreError> {
             Ok(vec![])
         }
     }

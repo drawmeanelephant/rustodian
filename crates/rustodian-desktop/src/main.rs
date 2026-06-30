@@ -190,6 +190,7 @@ impl RustodianApp {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn process_messages(&mut self) {
         let Some(rx) = &self.worker_rx else { return };
         let mut needs_reload = false;
@@ -219,7 +220,10 @@ impl RustodianApp {
                     };
                     self.scan_status = Some(format!(
                         "Scan finished: {} found, {} new, {} updated{}.",
-                        report.projects_found, report.projects_new, report.projects_updated, purge_info
+                        report.projects_found,
+                        report.projects_new,
+                        report.projects_updated,
+                        purge_info
                     ));
                 }
                 WorkerMessage::ScanComplete(Err(e)) => {

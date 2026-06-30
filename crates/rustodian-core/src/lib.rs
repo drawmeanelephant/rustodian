@@ -14,15 +14,15 @@
 
 pub mod bootstrapper;
 pub mod custodian;
-pub mod janitor;
 pub mod error;
+pub mod janitor;
 pub mod log_buffer;
 pub mod runner;
 pub mod traits;
 
 pub use bootstrapper::ProjectBootstrapper;
 pub use custodian::Custodian;
-pub use janitor::DigitalJanitor;
 pub use error::CoreError;
+pub use janitor::DigitalJanitor;
 pub use log_buffer::LogBuffer;
 pub use traits::{GitInspector, ProjectScanner, ProjectStore};

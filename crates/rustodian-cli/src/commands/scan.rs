@@ -36,7 +36,11 @@ pub fn execute(
         OutputFormat::Json => {
             println!(
                 "{{\"scan_id\":\"{}\",\"projects_found\":{},\"projects_new\":{},\"projects_updated\":{},\"projects_purged\":{}}}",
-                report.scan_id, report.projects_found, report.projects_new, report.projects_updated, report.projects_purged
+                report.scan_id,
+                report.projects_found,
+                report.projects_new,
+                report.projects_updated,
+                report.projects_purged
             );
         }
     }
