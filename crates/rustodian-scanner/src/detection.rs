@@ -30,6 +30,9 @@ pub fn detect_languages(project_path: &Path) -> Vec<LanguageDetection> {
     if let Some(d) = detect_ruby(project_path) {
         detections.push(d);
     }
+    if let Some(d) = detect_zig(project_path) {
+        detections.push(d);
+    }
 
     detections
 }
@@ -198,6 +201,38 @@ fn detect_ruby(path: &Path) -> Option<LanguageDetection> {
     })
 }
 
+/// Detect Zig projects.
+fn detect_zig(path: &Path) -> Option<LanguageDetection> {
+    let mut markers = Vec::new();
+
+    if path.join("build.zig").exists() {
+        markers.push(LanguageMarker::ManifestFile("build.zig".to_string()));
+    }
+
+    if path.join("build.zig.zon").exists() {
+        markers.push(LanguageMarker::LockFile("build.zig.zon".to_string()));
+    }
+
+    if markers.is_empty() {
+        return None;
+    }
+
+    let confidence = if markers
+        .iter()
+        .any(|m| matches!(m, LanguageMarker::ManifestFile(_)))
+    {
+        DetectionConfidence::High
+    } else {
+        DetectionConfidence::Medium
+    };
+
+    Some(LanguageDetection {
+        language: Language::Zig,
+        confidence,
+        markers,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -267,6 +302,16 @@ mod tests {
 
         let detections = detect_languages(dir.path());
         assert_eq!(detections.len(), 2);
+    }
+
+    #[test]
+    fn test_detect_zig_project() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("build.zig"), "").unwrap();
+
+        let detections = detect_languages(dir.path());
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].language, Language::Zig);
     }
 
     #[test]
