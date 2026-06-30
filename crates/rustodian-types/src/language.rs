@@ -10,6 +10,7 @@ pub enum Language {
     Python,
     Node,
     Go,
+    Ruby,
     /// A language we detected but don't have first-class support for.
     Unknown(String),
 }
@@ -21,6 +22,7 @@ impl std::fmt::Display for Language {
             Self::Python => write!(f, "Python"),
             Self::Node => write!(f, "Node"),
             Self::Go => write!(f, "Go"),
+            Self::Ruby => write!(f, "Ruby"),
             Self::Unknown(name) => write!(f, "{name}"),
         }
     }

@@ -27,6 +27,9 @@ pub fn detect_languages(project_path: &Path) -> Vec<LanguageDetection> {
     if let Some(d) = detect_go(project_path) {
         detections.push(d);
     }
+    if let Some(d) = detect_ruby(project_path) {
+        detections.push(d);
+    }
 
     detections
 }
@@ -151,6 +154,50 @@ fn detect_go(path: &Path) -> Option<LanguageDetection> {
     })
 }
 
+/// Detect Ruby projects.
+fn detect_ruby(path: &Path) -> Option<LanguageDetection> {
+    let mut markers = Vec::new();
+
+    if path.join("Gemfile").exists() {
+        markers.push(LanguageMarker::ManifestFile("Gemfile".to_string()));
+    }
+
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry
+                .file_name()
+                .to_str()
+                .filter(|n| n.ends_with(".gemspec"))
+            {
+                markers.push(LanguageMarker::ManifestFile(name.to_string()));
+            }
+        }
+    }
+
+    if path.join("Gemfile.lock").exists() {
+        markers.push(LanguageMarker::LockFile("Gemfile.lock".to_string()));
+    }
+
+    if markers.is_empty() {
+        return None;
+    }
+
+    let confidence = if markers
+        .iter()
+        .any(|m| matches!(m, LanguageMarker::ManifestFile(_)))
+    {
+        DetectionConfidence::High
+    } else {
+        DetectionConfidence::Medium
+    };
+
+    Some(LanguageDetection {
+        language: Language::Ruby,
+        confidence,
+        markers,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -200,6 +247,16 @@ mod tests {
         let detections = detect_languages(dir.path());
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].language, Language::Go);
+    }
+
+    #[test]
+    fn test_detect_ruby_project() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Gemfile"), "source 'https://rubygems.org'").unwrap();
+
+        let detections = detect_languages(dir.path());
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].language, Language::Ruby);
     }
 
     #[test]
