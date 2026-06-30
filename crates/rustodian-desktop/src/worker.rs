@@ -45,12 +45,12 @@ fn discover_docs(project_path: &Path) -> Vec<(String, PathBuf)> {
     found
 }
 
-pub struct WorkerState {
-    pub store: Arc<SqliteStore>,
-    pub running_process: Option<Arc<Mutex<Box<dyn RunningProcess>>>>,
-    pub is_running: Arc<Mutex<bool>>,
-    pub should_kill: Arc<Mutex<bool>>,
-    pub process_exited: Arc<std::sync::atomic::AtomicBool>,
+struct WorkerState {
+    store: Arc<SqliteStore>,
+    running_process: Option<Arc<Mutex<Box<dyn RunningProcess>>>>,
+    is_running: Arc<Mutex<bool>>,
+    should_kill: Arc<Mutex<bool>>,
+    process_exited: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[allow(clippy::too_many_lines)]
