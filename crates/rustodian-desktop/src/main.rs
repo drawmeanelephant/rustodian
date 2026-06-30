@@ -212,9 +212,14 @@ impl RustodianApp {
                     self.db_error = None;
                 }
                 WorkerMessage::ScanComplete(Ok(report)) => {
+                    let purge_info = if report.projects_purged > 0 {
+                        format!(", {} purged", report.projects_purged)
+                    } else {
+                        String::new()
+                    };
                     self.scan_status = Some(format!(
-                        "Scan finished: {} found, {} new, {} updated.",
-                        report.projects_found, report.projects_new, report.projects_updated
+                        "Scan finished: {} found, {} new, {} updated{}.",
+                        report.projects_found, report.projects_new, report.projects_updated, purge_info
                     ));
                 }
                 WorkerMessage::ScanComplete(Err(e)) => {

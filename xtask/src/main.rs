@@ -16,7 +16,10 @@ fn main() {
         Some("coverage") => coverage(),
         Some("lint") => lint(),
         Some("dist") => dist(),
-        Some("export-rag") => export_rag::export_rag(),
+        Some("export-rag") => {
+            let dirty_only = args.iter().any(|a| a == "--dirty-only");
+            export_rag::export_rag(dirty_only);
+        }
         Some("help") | None => help(),
         Some(unknown) => {
             eprintln!("Unknown command: {unknown}");
@@ -37,6 +40,7 @@ fn help() {
     println!("  lint        Run all lints (fmt + clippy + doc)");
     println!("  dist        Build release binaries");
     println!("  export-rag  Export codebase to RAG-friendly markdown files");
+    println!("              --dirty-only  Only export git-dirty files (untracked/modified/staged)");
     println!("  help        Show this help");
 }
 

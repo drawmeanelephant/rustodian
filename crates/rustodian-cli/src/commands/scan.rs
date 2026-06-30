@@ -29,11 +29,14 @@ pub fn execute(
             println!("Projects Found:   {}", report.projects_found);
             println!("New Projects:     {}", report.projects_new);
             println!("Updated Projects: {}", report.projects_updated);
+            if report.projects_purged > 0 {
+                println!("Purged (dead):    {}", report.projects_purged);
+            }
         }
         OutputFormat::Json => {
             println!(
-                "{{\"scan_id\":\"{}\",\"projects_found\":{},\"projects_new\":{},\"projects_updated\":{}}}",
-                report.scan_id, report.projects_found, report.projects_new, report.projects_updated
+                "{{\"scan_id\":\"{}\",\"projects_found\":{},\"projects_new\":{},\"projects_updated\":{},\"projects_purged\":{}}}",
+                report.scan_id, report.projects_found, report.projects_new, report.projects_updated, report.projects_purged
             );
         }
     }

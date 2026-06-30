@@ -1,5 +1,5 @@
 use ignore::WalkBuilder;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
@@ -27,14 +27,42 @@ impl Category {
     }
 }
 
-pub fn export_rag() {
+pub fn export_rag(dirty_only: bool) {
     println!("Exporting RAG friendly archives...");
+    if dirty_only {
+        println!("Mode: --dirty-only (filtering to git-dirty files only)");
+    }
 
     let out_dir = Path::new("rag_export");
     if out_dir.exists() {
         fs::remove_dir_all(out_dir).expect("Failed to clear existing rag_export directory");
     }
     fs::create_dir_all(out_dir).expect("Failed to create rag_export directory");
+
+    // ── Optional dirty-file filter ────────────────────────────────────────
+    let dirty_filter: Option<HashSet<std::path::PathBuf>> = if dirty_only {
+        use rustodian_core::traits::GitInspector;
+        let inspector = rustodian_git::Git2Inspector::default();
+        match inspector.get_dirty_files(Path::new(".")) {
+            Ok(files) => {
+                let set: HashSet<_> = files
+                    .into_iter()
+                    .map(|f| {
+                        // Canonicalize for reliable comparison
+                        f.canonicalize().unwrap_or(f)
+                    })
+                    .collect();
+                println!("  Found {} dirty file(s) to export.", set.len());
+                Some(set)
+            }
+            Err(e) => {
+                eprintln!("Warning: could not query git status: {e}. Exporting all files.");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let mut walker = WalkBuilder::new(".");
     walker.hidden(false); // We might want to see some hidden files like .gitignore, .github/
@@ -124,6 +152,14 @@ pub fn export_rag() {
         }
 
         let path_str = path.to_string_lossy().to_string();
+
+        // ── Dirty-only filter gate ────────────────────────────────────────
+        if let Some(ref filter) = dirty_filter {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if !filter.contains(&canon) {
+                continue;
+            }
+        }
 
         // Skip some common generated or unhelpful stuff
         if path_str.contains("Cargo.lock") {

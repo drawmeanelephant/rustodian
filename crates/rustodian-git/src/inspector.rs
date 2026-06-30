@@ -13,24 +13,6 @@ use rustodian_types::{CommitInfo, VcsInfo, VcsType};
 #[derive(Debug, Default)]
 pub struct Git2Inspector;
 
-impl Git2Inspector {
-    pub fn get_dirty_files(&self, repo: &Repository) -> Result<Vec<std::path::PathBuf>, CoreError> {
-        let mut status_opts = StatusOptions::new();
-        status_opts.include_untracked(true);
-        let statuses = repo
-            .statuses(Some(&mut status_opts))
-            .map_err(|e| CoreError::Git(e.to_string()))?;
-
-        let mut dirty_files = Vec::new();
-        for entry in statuses.iter() {
-            if let Ok(path) = entry.path() {
-                dirty_files.push(std::path::PathBuf::from(path));
-            }
-        }
-        Ok(dirty_files)
-    }
-}
-
 impl GitInspector for Git2Inspector {
     #[instrument(skip(self), fields(path = %project_path.display()))]
     fn inspect(&self, project_path: &Path) -> Result<Option<VcsInfo>, CoreError> {
@@ -57,7 +39,7 @@ impl GitInspector for Git2Inspector {
             .and_then(|r| r.url().ok().map(std::string::ToString::to_string));
 
         let is_dirty = self
-            .get_dirty_files(&repo)
+            .get_dirty_files(project_path)
             .is_ok_and(|files| !files.is_empty());
 
         let last_commit = match repo.head().and_then(|head| head.peel_to_commit()) {
@@ -88,6 +70,25 @@ impl GitInspector for Git2Inspector {
             last_commit,
         }))
     }
+
+    fn get_dirty_files(&self, project_path: &Path) -> Result<Vec<std::path::PathBuf>, CoreError> {
+        let repo = Repository::open(project_path)
+            .map_err(|e| CoreError::Git(e.to_string()))?;
+
+        let mut status_opts = StatusOptions::new();
+        status_opts.include_untracked(true);
+        let statuses = repo
+            .statuses(Some(&mut status_opts))
+            .map_err(|e| CoreError::Git(e.to_string()))?;
+
+        let mut dirty_files = Vec::new();
+        for entry in statuses.iter() {
+            if let Ok(path) = entry.path() {
+                dirty_files.push(std::path::PathBuf::from(path));
+            }
+        }
+        Ok(dirty_files)
+    }
 }
 
 #[cfg(test)]
@@ -117,5 +118,28 @@ mod tests {
         assert_eq!(info.vcs_type, VcsType::Git);
         assert!(!info.is_dirty);
         assert!(info.branch.is_none());
+    }
+
+    #[test]
+    fn test_get_dirty_files_clean_repo() {
+        let dir = TempDir::new().unwrap();
+        let _repo = Repository::init(dir.path()).unwrap();
+
+        let inspector = Git2Inspector;
+        let dirty = inspector.get_dirty_files(dir.path()).unwrap();
+        assert!(dirty.is_empty());
+    }
+
+    #[test]
+    fn test_get_dirty_files_with_untracked() {
+        let dir = TempDir::new().unwrap();
+        let _repo = Repository::init(dir.path()).unwrap();
+
+        std::fs::write(dir.path().join("new_file.txt"), "hello").unwrap();
+
+        let inspector = Git2Inspector;
+        let dirty = inspector.get_dirty_files(dir.path()).unwrap();
+        assert_eq!(dirty.len(), 1);
+        assert_eq!(dirty[0], std::path::PathBuf::from("new_file.txt"));
     }
 }

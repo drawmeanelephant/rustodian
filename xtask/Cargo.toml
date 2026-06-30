@@ -9,6 +9,8 @@ repository = "https://github.com/drawmeanelephant/rustodian"
 
 [dependencies]
 ignore.workspace = true
+rustodian-core.workspace = true
+rustodian-git.workspace = true
 
 # xtask intentionally does not use workspace inheritance
 # to keep it self-contained

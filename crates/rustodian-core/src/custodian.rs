@@ -22,6 +22,7 @@ pub struct ScanReport {
     pub projects_found: usize,
     pub projects_new: usize,
     pub projects_updated: usize,
+    pub projects_purged: usize,
 }
 
 /// Overall status summary.
@@ -59,6 +60,11 @@ impl Custodian {
             git,
             runner,
         }
+    }
+
+    /// Access the underlying project store.
+    pub fn store(&self) -> &dyn ProjectStore {
+        self.store.as_ref()
     }
 
     /// Scan a directory tree for projects and store the results.
@@ -116,11 +122,28 @@ impl Custodian {
 
         let scan_id = self.store.save_scan(&scan_record)?;
 
+        // ── Self-Healing Garbage Collection Pass ──────────────────────
+        // Purge tracked projects whose paths no longer exist on disk.
+        let mut projects_purged = 0usize;
+        let all_tracked = self.store.list_projects()?;
+        for tracked in &all_tracked {
+            if !tracked.path.exists() {
+                self.store.delete_project(&tracked.id)?;
+                info!(
+                    project = %tracked.name,
+                    path = %tracked.path.display(),
+                    "Garbage-collected dead project path"
+                );
+                projects_purged += 1;
+            }
+        }
+
         Ok(ScanReport {
             scan_id,
             projects_found: discovered.len(),
             projects_new,
             projects_updated,
+            projects_purged,
         })
     }
 

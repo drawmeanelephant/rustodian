@@ -66,6 +66,10 @@ pub trait GitInspector: Send + Sync {
     /// Inspect a project directory for git information.
     /// Returns `None` if the directory is not a git repository.
     fn inspect(&self, project_path: &Path) -> Result<Option<VcsInfo>, CoreError>;
+
+    /// Query the repository status for untracked, modified, or staged files.
+    /// Returns an empty vec if the path is not a git repository.
+    fn get_dirty_files(&self, project_path: &Path) -> Result<Vec<std::path::PathBuf>, CoreError>;
 }
 use rustodian_types::RemoteProject;
 
