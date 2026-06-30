@@ -29,3 +29,6 @@ rustodian-git.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+insta.workspace = true
