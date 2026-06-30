@@ -32,7 +32,7 @@ struct Cli {
     command: Commands,
 
     /// Output format
-    #[arg(long, global = true, default_value = "table")]
+    #[arg(long, alias = "output", global = true, default_value = "table")]
     format: OutputFormat,
 
     /// Verbosity level (-v, -vv, -vvv)
