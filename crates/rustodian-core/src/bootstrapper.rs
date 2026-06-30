@@ -38,7 +38,7 @@ impl<'a> ProjectBootstrapper<'a> {
                 Language::Python => {
                     self.bootstrap_python(project, &env)?;
                 }
-                Language::Unknown(_) | Language::Ruby => {}
+                Language::Unknown(_) | Language::Ruby | Language::Zig => {}
             }
         }
 

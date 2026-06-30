@@ -28,3 +28,11 @@ tarpaulin-report.html
 Thumbs.db
 rag_export/
 *.log
+
+# Generated log files
+clippy.log
+test.log
+
+# Working/scratch docs
+gemini.md
+rag_*.md
