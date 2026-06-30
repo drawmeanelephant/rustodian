@@ -70,7 +70,7 @@ pub struct ParsedMarkdown {
 pub enum WorkerMessage {
     /// Result of loading projects.
     /// Result of scanning projects.
-    ScanComplete(Result<rustodian_core::custodian::ScanReport, String>),
+    ScanComplete(Result<rustodian_core::custodian::ScanReport, anyhow::Error>),
 
     ProjectsLoaded(Result<Vec<Project>, String>),
 

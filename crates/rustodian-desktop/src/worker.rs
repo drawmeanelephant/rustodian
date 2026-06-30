@@ -265,7 +265,7 @@ pub fn run_worker(
                 );
                 let res = custodian
                     .scan(&path, &rustodian_types::ScanConfig::default())
-                    .map_err(|e| e.to_string());
+                    .map_err(anyhow::Error::from);
                 let _ = tx.send(WorkerMessage::ScanComplete(res));
                 let list_res = state.store.list_projects().map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::ProjectsLoaded(list_res));
