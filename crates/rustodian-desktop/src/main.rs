@@ -276,6 +276,18 @@ impl RustodianApp {
                             }
 
                             self.doc_caches.insert(project_path.clone(), cache);
+
+                            if self.doc_caches.len() > 50 {
+                                // evict the entry with the oldest `last_checked` timestamp
+                                if let Some(oldest_key) = self
+                                    .doc_caches
+                                    .iter()
+                                    .min_by_key(|(_, v)| v.last_checked)
+                                    .map(|(k, _)| k.clone())
+                                {
+                                    self.doc_caches.remove(&oldest_key);
+                                }
+                            }
                         }
                     }
                 }
