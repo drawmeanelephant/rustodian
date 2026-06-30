@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 mod message;
+mod markdown;
 mod worker;
 
 use message::{GuiMessage, MarkdownBlock, ParsedMarkdown, WorkerMessage};
