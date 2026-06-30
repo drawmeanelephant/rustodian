@@ -27,3 +27,4 @@ tarpaulin-report.html
 # OS
 Thumbs.db
 rag_export/
+*.log
