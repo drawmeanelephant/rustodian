@@ -355,8 +355,6 @@ impl eframe::App for RustodianApp {
                 }
                 ui.separator();
 
-                ui.separator();
-
                 if let Some(err) = &self.db_error {
                     ui.colored_label(egui::Color32::RED, err);
                     return;
