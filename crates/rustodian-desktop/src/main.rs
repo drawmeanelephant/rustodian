@@ -363,10 +363,14 @@ impl eframe::App for RustodianApp {
                     let path = std::path::PathBuf::from(&self.scan_root_input);
                     self.send(GuiMessage::ScanProjects { path: path.clone() });
                     self.scan_status = Some("Scanning...".to_string());
-                    self.send(GuiMessage::SaveSetting {
-                        key: "scan_root".to_string(),
-                        value: self.scan_root_input.clone(),
-                    });
+                    if let Some(tx) = &self.worker_tx {
+                        if let Err(e) = tx.send(GuiMessage::SaveSetting {
+                            key: "scan_root".to_string(),
+                            value: self.scan_root_input.clone(),
+                        }) {
+                            tracing::error!("Worker channel closed unexpectedly: {e}");
+                        }
+                    }
                     // Since worker does the scan, we can just let worker do it, or we do it here.
                     // Actually, let's just trigger the scan.
                 }
