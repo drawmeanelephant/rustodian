@@ -25,24 +25,24 @@ fn main() -> eframe::Result {
             Ok(s) => {
                 let store = Arc::new(s);
 
-            let (gui_tx, worker_rx) = std::sync::mpsc::channel();
-            let (worker_tx, gui_rx) = std::sync::mpsc::channel();
+                let (gui_tx, worker_rx) = std::sync::mpsc::channel();
+                let (worker_tx, gui_rx) = std::sync::mpsc::channel();
 
-            let ctx_clone = cc.egui_ctx.clone();
-            let store_clone = store.clone();
-            std::thread::spawn(move || {
-                worker::run_worker(store_clone, &worker_rx, &worker_tx, &ctx_clone);
-            });
+                let ctx_clone = cc.egui_ctx.clone();
+                let store_clone = store.clone();
+                std::thread::spawn(move || {
+                    worker::run_worker(store_clone, &worker_rx, &worker_tx, &ctx_clone);
+                });
 
-            let default_scan_root = dirs::home_dir()
-                .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().to_string());
-            let scan_root_input = store
-                .get_setting("scan_root")
-                .ok()
-                .flatten()
-                .unwrap_or(default_scan_root);
+                let default_scan_root = dirs::home_dir()
+                    .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().to_string());
+                let scan_root_input = store
+                    .get_setting("scan_root")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(default_scan_root);
 
-            let mut app = RustodianApp {
+                let mut app = RustodianApp {
                     worker_tx: Some(gui_tx),
                     worker_rx: Some(gui_rx),
                     scan_root_input,
