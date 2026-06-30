@@ -232,8 +232,9 @@ impl RustodianApp {
                         purge_info
                     ));
                 }
+                #[allow(clippy::to_string_in_format_args)]
                 WorkerMessage::ScanComplete(Err(e)) => {
-                    self.scan_status = Some(format!("Scan failed: {e}"));
+                    self.scan_status = Some(format!("Scan failed: {}", e.to_string()));
                 }
 
                 WorkerMessage::ProjectsLoaded(Err(e)) => {
