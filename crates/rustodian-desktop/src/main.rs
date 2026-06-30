@@ -302,6 +302,7 @@ impl RustodianApp {
                 }
                 WorkerMessage::DocFresh { path: _ } => {
                     // It's fresh, do nothing, the last_checked was already reset on dispatch
+                    // intentional no-op: UI does not react to this message variant
                 }
             }
         }
