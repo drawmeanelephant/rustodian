@@ -7,8 +7,8 @@ use rustodian_types::Project;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-mod message;
 mod markdown;
+mod message;
 mod worker;
 
 use message::{GuiMessage, MarkdownBlock, ParsedMarkdown, WorkerMessage};
