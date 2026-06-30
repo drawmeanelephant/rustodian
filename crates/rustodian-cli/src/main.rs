@@ -103,6 +103,9 @@ enum Commands {
         #[arg(long, default_value = "10")]
         limit: usize,
     },
+
+    /// Print active configuration
+    Config,
 }
 
 #[derive(Subcommand)]
@@ -182,5 +185,6 @@ fn main() -> Result<()> {
         Commands::Logs { project, limit } => {
             commands::logs::execute(&custodian, &store, &project, limit, &cli.format)
         }
+        Commands::Config => commands::config::execute(&db_path, &cli.format),
     }
 }
