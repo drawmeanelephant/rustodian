@@ -68,7 +68,7 @@ fn setup_db() -> Result<SqliteStore> {
     Ok(store)
 }
 
-#[derive(PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 enum Tab {
     #[default]
     Details,
