@@ -72,6 +72,7 @@ fn setup_db() -> Result<SqliteStore> {
 enum Tab {
     #[default]
     Details,
+    GitContext,
     PullRequests,
     Tasks,
     RunnerLogs,
@@ -397,7 +398,7 @@ impl eframe::App for RustodianApp {
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
-            if let Some(project) = &self.selected_project {
+            if let Some(project) = self.selected_project.clone() {
                 ui.horizontal(|ui| {
                     ui.heading(&project.name);
 
@@ -418,6 +419,11 @@ impl eframe::App for RustodianApp {
 
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.selected_tab, Tab::Details, "Details");
+                    ui.selectable_value(
+                        &mut self.selected_tab,
+                        Tab::GitContext,
+                        "Git Context (RAG)",
+                    );
                     ui.selectable_value(&mut self.selected_tab, Tab::PullRequests, "Pull Requests");
                     ui.selectable_value(&mut self.selected_tab, Tab::Tasks, "Tasks");
                     ui.selectable_value(&mut self.selected_tab, Tab::RunnerLogs, "Runner / Logs");
@@ -443,6 +449,41 @@ impl eframe::App for RustodianApp {
                                 };
                                 ui.label(format!("Latest Commit: {} - {}", sha, commit.message));
                             }
+                        }
+
+                        ui.separator();
+                        if ui.button("Purge Workspace Cruft").clicked() {
+                            self.run_command(
+                                "janitor:clean",
+                                "echo 'Worker hook pending'",
+                                &project.id,
+                                &project.path,
+                                false,
+                            );
+                            self.selected_tab = Tab::RunnerLogs;
+                        }
+                    }
+                    Tab::GitContext => {
+                        ui.label("Git Context (RAG):");
+                        if ui.button("Get Dirty Files").clicked() {
+                            self.run_command(
+                                "get_dirty_files",
+                                "echo 'Worker hook pending'",
+                                &project.id,
+                                &project.path,
+                                false,
+                            );
+                            self.selected_tab = Tab::RunnerLogs;
+                        }
+                        if ui.button("Export RAG Context").clicked() {
+                            self.run_command(
+                                "export-rag",
+                                "cargo xtask export-rag --dirty-only",
+                                &project.id,
+                                &project.path,
+                                false,
+                            );
+                            self.selected_tab = Tab::RunnerLogs;
                         }
                     }
                     Tab::PullRequests => {
@@ -562,6 +603,7 @@ impl RustodianApp {
                                         &project.path,
                                         cmd.use_shell,
                                     );
+                                    self.selected_tab = Tab::RunnerLogs;
                                 }
                                 ui.end_row();
                             }
