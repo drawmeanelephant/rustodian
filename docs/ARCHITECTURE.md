@@ -1,19 +1,24 @@
 # Architecture
 
-Rustodian is a Cargo workspace with 6 library/binary crates organized for clean separation of concerns.
+Rustodian is a Cargo workspace with 8 library/binary crates organized for clean separation of concerns.
 
 ## Crate Dependency Graph
 
 ```
-                    rustodian-cli (binary)
-                   /       |        \
-                  /        |         \
-    rustodian-storage  rustodian-scanner  rustodian-git
-                  \        |         /
-                   \       |        /
-                    rustodian-core (traits)
-                          |
-                    rustodian-types (data)
+       rustodian-cli (binary)          rustodian-desktop (binary)
+                 |                                 |
+                 +-----------------+---------------+
+                                   |
+    rustodian-remote   rustodian-storage   rustodian-scanner   rustodian-git
+             \                 |                   |                  /
+              \                |                   |                 /
+               \               +-------------------+----------------+
+                \                                  |
+                 +-------------------------- rustodian-core (traits)
+                                                   |
+                                            rustodian-types (data)
+
+    xtask (automation) --------------------> rustodian-core, rustodian-git
 ```
 
 ## Boundary Rules
@@ -50,6 +55,22 @@ These are the constitutional rules. Violations should fail code review.
 - **Depends on**: Everything (it wires implementations together)
 - **Nobody depends on**: cli
 
+### rustodian-desktop
+- **Is**: Desktop GUI application and composition root
+- **Depends on**: Everything (it wires implementations together for the GUI)
+- **Nobody depends on**: desktop
+
+### rustodian-remote
+- **Is**: Remote repository fetcher (e.g., GitHub)
+- **Depends on**: rustodian-types, rustodian-core, tokio, reqwest
+- **Never depends on**: storage, scanner, git, clap
+
+### xtask
+- **Is**: Workspace automation tasks (e.g., `export-rag`)
+- **Depends on**: rustodian-core, rustodian-git, ignore
+- **Nobody depends on**: xtask
+
+
 ## Key Invariant
 
 Infrastructure crates (storage, scanner, git) **never depend on each other**.
@@ -70,12 +91,14 @@ pub struct Custodian {
 
 Rationale: A CLI tool that waits on filesystem I/O and SQLite gains nothing from monomorphization. Dynamic dispatch costs one vtable lookup per call — irrelevant when each call does disk I/O.
 
+## Desktop UI Note
+
+The desktop application (`rustodian-desktop`) includes a project browser, command runner, doc viewer, and several tabs. Note that the **Pull Requests** tab in the desktop app is currently a placeholder and is not yet implemented.
+
 ## Future Extension Points
 
 | Feature | How It Fits |
 |---------|------------|
-| Desktop UI | New binary crate parallel to cli, consuming the same core |
 | Plugin system | New trait + crate for plugin loading |
-| Remote repos | New crate with async + tokio (only crate that needs it) |
 | Code search | New crate implementing a SearchIndex trait |
 | Dependency graphs | New crate implementing a DependencyAnalyzer trait |

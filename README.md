@@ -32,6 +32,12 @@ rustodian info my-awesome-project
 
 # Observatory status
 rustodian status
+
+# Remote Project Tracking
+rustodian remote add my-org/my-repo --preserve "config.json"
+rustodian remote list
+rustodian remote refresh --dest ~/projects
+
 ```
 
 ## Features
@@ -41,6 +47,19 @@ rustodian status
 - 🌿 **Git Integration** — Extracts branch, remote, dirty status, and last commit info
 - 💾 **Local Storage** — SQLite database for fast queries with zero configuration
 - 📊 **Multiple Outputs** — Table and JSON output formats
+- 🧹 **Digital Janitor** — Reclaims disk space by purging workspace cruft (e.g., `target/`, `node_modules/`). Supports dry-run for inspection and purge mode.
+- 🌐 **Remote Project Tracking** — Track and refresh repositories from remote sources like GitHub directly into your local workspace.
+
+
+## Desktop GUI
+
+Rustodian includes a desktop graphical interface built with `eframe`/`egui`. It features a project browser, command runner, a document viewer (for rendering `README.md`, `CHANGELOG.md`, `TODO.md`), and dedicated tabs for Details, Git Context, Tasks, and Runner Logs.
+
+To run the desktop app:
+
+```bash
+cargo run -p rustodian-desktop
+```
 
 ## Installation
 
@@ -97,6 +116,7 @@ just clippy       # Run lints
 just test         # Run tests
 just build        # Build all crates
 just run scan .   # Run the CLI
+cargo xtask export-rag # Export codebase to RAG-friendly markdown files
 ```
 
 See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full guide.
