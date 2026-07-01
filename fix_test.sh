@@ -1,0 +1,1 @@
+sed -i 's/conn.execute("UPDATE projects SET metadata_json = '"'not_json'"' WHERE id = ?1", rusqlite::params!\[id.to_string()\]).unwrap();/conn.execute("UPDATE projects SET metadata_json = '"'not_json'"' WHERE id = ?1", rusqlite::params!\[id.to_string()\]).unwrap(); drop(conn);/' crates/rustodian-storage/src/store.rs
