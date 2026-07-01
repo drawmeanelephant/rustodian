@@ -13,6 +13,7 @@ pub enum GuiMessage {
     /// Run a command for a project.
     RunCommand {
         project_id: ProjectId,
+        #[allow(dead_code)]
         project_path: PathBuf,
         command_name: String,
         command_str: String,
@@ -27,6 +28,7 @@ pub enum GuiMessage {
     KillCommand,
     /// Discover documentation files in a project root.
     DiscoverDocs {
+        #[allow(dead_code)]
         project_path: PathBuf,
     },
     /// Check if a specific document file is fresh.
@@ -44,6 +46,18 @@ pub enum GuiMessage {
     LoadDocContent {
         path: PathBuf,
         known_hash: Option<u64>,
+    },
+
+    PurgeCruft {
+        project_id: ProjectId,
+        #[allow(dead_code)]
+        project_path: PathBuf,
+        dry_run: bool,
+    },
+
+    GetDirtyFiles {
+        #[allow(dead_code)]
+        project_path: PathBuf,
     },
 }
 
@@ -84,6 +98,7 @@ pub enum WorkerMessage {
 
     /// Result of discovering documentation files.
     DocsDiscovered {
+        #[allow(dead_code)]
         project_path: PathBuf,
         available_docs: Vec<(String, PathBuf)>,
     },
@@ -107,4 +122,10 @@ pub enum WorkerMessage {
 
     /// Result when content has not changed.
     DocUnchanged,
+
+    /// Result of running the digital janitor.
+    CruftPurged(Result<rustodian_core::janitor::JanitorReport, String>),
+
+    /// Result of getting dirty files from git inspector.
+    DirtyFilesResult(Result<Vec<PathBuf>, String>),
 }
