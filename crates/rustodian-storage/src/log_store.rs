@@ -191,3 +191,55 @@ impl SqliteStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustodian_core::traits::ProjectStore;
+    use rustodian_types::{Project, ProjectId};
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_list_logs_pagination_boundaries() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        store.migrate().unwrap();
+
+        let proj = Project {
+            id: ProjectId::new(),
+            name: "test_proj".to_string(),
+            path: PathBuf::from("/test"),
+            discovered_at: chrono::Utc::now(),
+            last_scanned_at: None,
+            vcs: None,
+            languages: vec![],
+            metadata: rustodian_types::ProjectMetadata::default(),
+        };
+        store.save_project(&proj).unwrap();
+
+        let log1 = ProjectLog {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: proj.id.to_string(),
+            command_name: "test_cmd".to_string(),
+            exit_code: Some(0),
+            log_text: "log 1".to_string(),
+            run_at: chrono::Utc::now(),
+        };
+        let log2 = ProjectLog {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: proj.id.to_string(),
+            command_name: "test_cmd".to_string(),
+            exit_code: Some(0),
+            log_text: "log 2".to_string(),
+            run_at: chrono::Utc::now(),
+        };
+
+        store.save_log(&log1).unwrap();
+        store.save_log(&log2).unwrap();
+
+        let logs_empty = store.list_logs(&proj.id.to_string(), 0).unwrap();
+        assert!(logs_empty.is_empty());
+
+        let logs_all = store.list_logs(&proj.id.to_string(), 10).unwrap();
+        assert_eq!(logs_all.len(), 2);
+    }
+}

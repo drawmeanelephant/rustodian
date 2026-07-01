@@ -1,0 +1,1 @@
+sed -i 's/assert!(err.to_string().contains("invalid metadata JSON"));/println!("{}", err.to_string()); assert!(err.to_string().contains("invalid metadata JSON"));/' crates/rustodian-storage/src/store.rs

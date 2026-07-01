@@ -474,6 +474,50 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_save_project_upsert_and_malformed_json() {
+        use rustodian_core::traits::ProjectStore;
+        use rustodian_types::{Project, ProjectId};
+        use std::path::PathBuf;
+
+        let store = SqliteStore::open_in_memory().unwrap();
+        store.migrate().unwrap();
+
+        let mut proj = Project {
+            id: ProjectId::new(),
+            name: "test_proj".to_string(),
+            path: PathBuf::from("/test"),
+            discovered_at: chrono::Utc::now(),
+            last_scanned_at: None,
+            vcs: None,
+            languages: vec![],
+            metadata: rustodian_types::ProjectMetadata::default(),
+        };
+
+        // Initial save
+        let id = store.save_project(&proj).unwrap();
+
+        // Upsert save
+        proj.name = "test_proj_updated".to_string();
+        store.save_project(&proj).unwrap();
+
+        let loaded = store.get_project(&id).unwrap().unwrap();
+        assert_eq!(loaded.name, "test_proj_updated");
+
+        // Manually break the json
+        let conn = store.get_conn().unwrap();
+        conn.execute(
+            "UPDATE projects SET metadata_json = 'not_json' WHERE id = ?1",
+            rusqlite::params![id.to_string()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let err = store.get_project(&id).unwrap_err();
+        println!("{err}");
+        assert!(err.to_string().contains("invalid metadata JSON"));
+    }
     use super::*;
 
     #[test]
