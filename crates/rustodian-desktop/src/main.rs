@@ -116,6 +116,10 @@ struct RustodianApp {
 
     // Render state
     log_display_buf: String,
+
+    janitor_report: Option<Result<rustodian_core::janitor::JanitorReport, String>>,
+    show_purge_confirm: bool,
+    dirty_files: Option<Result<Vec<std::path::PathBuf>, String>>,
 }
 
 impl RustodianApp {
@@ -322,6 +326,12 @@ impl RustodianApp {
                     // It's fresh, do nothing, the last_checked was already reset on dispatch
                     // intentional no-op: UI does not react to this message variant
                 }
+                WorkerMessage::CruftPurged(res) => {
+                    self.janitor_report = Some(res);
+                }
+                WorkerMessage::DirtyFilesResult(res) => {
+                    self.dirty_files = Some(res);
+                }
             }
         }
 
@@ -488,28 +498,60 @@ impl eframe::App for RustodianApp {
                         }
 
                         ui.separator();
-                        if ui.button("Purge Workspace Cruft").clicked() {
-                            self.run_command(
-                                "janitor:clean",
-                                "echo 'Worker hook pending'",
-                                &project.id,
-                                &project.path,
-                                false,
-                            );
-                            self.selected_tab = Tab::RunnerLogs;
+                        ui.horizontal(|ui| {
+                            if ui.button("Dry Run Purge").clicked() {
+                                self.send(GuiMessage::PurgeCruft {
+                                    project_id: project.id.clone(),
+                                    project_path: project.path.clone(),
+                                    dry_run: true,
+                                });
+                                self.selected_tab = Tab::RunnerLogs;
+                            }
+                            if ui.button("Purge Workspace Cruft").clicked() {
+                                self.show_purge_confirm = !self.show_purge_confirm;
+                            }
+                        });
+                        if self.show_purge_confirm {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("⚠ Are you sure? This will delete build artifacts.").color(egui::Color32::RED));
+                                if ui.button("Confirm Purge").clicked() {
+                                    self.send(GuiMessage::PurgeCruft {
+                                        project_id: project.id.clone(),
+                                        project_path: project.path.clone(),
+                                        dry_run: false,
+                                    });
+                                    self.show_purge_confirm = false;
+                                    self.selected_tab = Tab::RunnerLogs;
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    self.show_purge_confirm = false;
+                                }
+                            });
                         }
                     }
                     Tab::GitContext => {
                         ui.label("Git Context (RAG):");
                         if ui.button("Get Dirty Files").clicked() {
-                            self.run_command(
-                                "get_dirty_files",
-                                "echo 'Worker hook pending'",
-                                &project.id,
-                                &project.path,
-                                false,
-                            );
-                            self.selected_tab = Tab::RunnerLogs;
+                            self.send(GuiMessage::GetDirtyFiles {
+                                project_path: project.path.clone(),
+                            });
+                        }
+                        if let Some(res) = &self.dirty_files {
+                            match res {
+                                Ok(files) => {
+                                    if files.is_empty() {
+                                        ui.label("No dirty files.");
+                                    } else {
+                                        ui.label("Dirty files:");
+                                        for file in files {
+                                            ui.label(format!("- {}", file.display()));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    ui.colored_label(egui::Color32::RED, format!("Error getting dirty files: {}", e));
+                                }
+                            }
                         }
                         if ui.button("Export RAG Context").clicked() {
                             self.run_command(
@@ -604,6 +646,29 @@ impl RustodianApp {
                 self.running_cmd_log = None;
                 self.running_cmd_name = None;
                 self.running_cmd_status = None;
+            }
+
+            if let Some(report) = &self.janitor_report {
+                ui.separator();
+                ui.heading("Janitor Report");
+                match report {
+                    Ok(rep) => {
+                        ui.label(format!("Dry run: {}", rep.dry_run));
+                        ui.label(format!("Reclaimed bytes: {}", rep.bytes_reclaimed));
+                        if rep.targets_found.is_empty() {
+                            ui.label("No targets found.");
+                        } else {
+                            ui.label("Targets found:");
+                            for target in &rep.targets_found {
+                                ui.label(format!("- {}", target));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
+                    }
+                }
+                ui.separator();
             }
 
             let project = self.selected_project.clone();

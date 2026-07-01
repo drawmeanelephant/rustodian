@@ -272,6 +272,36 @@ pub fn run_worker(
                 ctx.request_repaint();
             }
 
+
+            GuiMessage::PurgeCruft { project_id, project_path: _, dry_run } => {
+                let scanner = rustodian_scanner::FsScanner;
+                let git = rustodian_git::Git2Inspector;
+                let runner = rustodian_core::runner::DefaultCommandRunner;
+                let custodian = rustodian_core::Custodian::new(
+                    Box::new((*state.store).clone()),
+                    Box::new(scanner),
+                    Box::new(git),
+                    Box::new(runner),
+                );
+
+                let res = match state.store.get_project(&project_id) {
+                    Ok(Some(project)) => {
+                        let janitor = rustodian_core::janitor::DigitalJanitor::new(&custodian);
+                        janitor.clean(&project, dry_run).map_err(|e| e.to_string())
+                    }
+                    Ok(None) => Err("Project not found".to_string()),
+                    Err(e) => Err(e.to_string()),
+                };
+
+                let _ = tx.send(WorkerMessage::CruftPurged(res));
+                ctx.request_repaint();
+            }
+            GuiMessage::GetDirtyFiles { project_path } => {
+                let git = rustodian_git::Git2Inspector;
+                let res = rustodian_core::traits::GitInspector::get_dirty_files(&git, &project_path).map_err(|e| e.to_string());
+                let _ = tx.send(WorkerMessage::DirtyFilesResult(res));
+                ctx.request_repaint();
+            }
             GuiMessage::SaveSetting { key, value } => {
                 let _ = state.store.set_setting(&key, &value);
             }
