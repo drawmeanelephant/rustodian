@@ -27,6 +27,10 @@ pub enum CoreError {
     #[error("git error: {0}")]
     Git(String),
 
+    /// Rate limit exceeded on a remote API.
+    #[error("API rate limit exceeded")]
+    RateLimitExceeded,
+
     /// An unexpected internal error.
     #[error("internal error: {0}")]
     Internal(String),

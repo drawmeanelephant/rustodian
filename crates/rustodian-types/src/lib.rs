@@ -13,4 +13,4 @@ pub use language::{DetectionConfidence, Language, LanguageDetection, LanguageMar
 pub use project::RemoteProject;
 pub use project::{Project, ProjectCommand, ProjectId, ProjectLog, ProjectMetadata};
 pub use scan::{ScanConfig, ScanId, ScanRecord, ScanStatus};
-pub use vcs::{CommitInfo, VcsInfo, VcsType};
+pub use vcs::{CommitInfo, PullRequest, VcsInfo, VcsType};

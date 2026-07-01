@@ -36,3 +36,15 @@ pub struct CommitInfo {
     pub author: String,
     pub timestamp: DateTime<Utc>,
 }
+
+/// A pull request from a remote repository.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PullRequest {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub branch: String,
+    pub url: String,
+    pub updated_at: DateTime<Utc>,
+    pub is_draft: bool,
+}
