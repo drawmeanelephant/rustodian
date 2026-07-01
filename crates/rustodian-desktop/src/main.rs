@@ -513,7 +513,12 @@ impl eframe::App for RustodianApp {
                         });
                         if self.show_purge_confirm {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("⚠ Are you sure? This will delete build artifacts.").color(egui::Color32::RED));
+                                ui.label(
+                                    egui::RichText::new(
+                                        "⚠ Are you sure? This will delete build artifacts.",
+                                    )
+                                    .color(egui::Color32::RED),
+                                );
                                 if ui.button("Confirm Purge").clicked() {
                                     self.send(GuiMessage::PurgeCruft {
                                         project_id: project.id.clone(),
@@ -549,7 +554,10 @@ impl eframe::App for RustodianApp {
                                     }
                                 }
                                 Err(e) => {
-                                    ui.colored_label(egui::Color32::RED, format!("Error getting dirty files: {}", e));
+                                    ui.colored_label(
+                                        egui::Color32::RED,
+                                        format!("Error getting dirty files: {e}"),
+                                    );
                                 }
                             }
                         }
@@ -583,6 +591,7 @@ impl eframe::App for RustodianApp {
 }
 
 impl RustodianApp {
+    #[allow(clippy::too_many_lines)]
     fn render_runner_logs(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         if self.is_running {
             let cmd_name = self.running_cmd_name.clone().unwrap_or_default();
@@ -660,12 +669,12 @@ impl RustodianApp {
                         } else {
                             ui.label("Targets found:");
                             for target in &rep.targets_found {
-                                ui.label(format!("- {}", target));
+                                ui.label(format!("- {target}"));
                             }
                         }
                     }
                     Err(e) => {
-                        ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
+                        ui.colored_label(egui::Color32::RED, format!("Error: {e}"));
                     }
                 }
                 ui.separator();

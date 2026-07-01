@@ -272,8 +272,11 @@ pub fn run_worker(
                 ctx.request_repaint();
             }
 
-
-            GuiMessage::PurgeCruft { project_id, project_path: _, dry_run } => {
+            GuiMessage::PurgeCruft {
+                project_id,
+                project_path: _,
+                dry_run,
+            } => {
                 let scanner = rustodian_scanner::FsScanner;
                 let git = rustodian_git::Git2Inspector;
                 let runner = rustodian_core::runner::DefaultCommandRunner;
@@ -298,7 +301,9 @@ pub fn run_worker(
             }
             GuiMessage::GetDirtyFiles { project_path } => {
                 let git = rustodian_git::Git2Inspector;
-                let res = rustodian_core::traits::GitInspector::get_dirty_files(&git, &project_path).map_err(|e| e.to_string());
+                let res =
+                    rustodian_core::traits::GitInspector::get_dirty_files(&git, &project_path)
+                        .map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::DirtyFilesResult(res));
                 ctx.request_repaint();
             }
