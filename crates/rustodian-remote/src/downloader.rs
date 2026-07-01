@@ -140,10 +140,16 @@ impl RemoteDownloader for GithubDownloader {
 
 #[async_trait::async_trait]
 impl rustodian_core::traits::PullRequestFetcher for GithubDownloader {
-    async fn fetch_open_prs(&self, repo_slug: &str) -> Result<Vec<rustodian_types::PullRequest>, rustodian_core::CoreError> {
+    async fn fetch_open_prs(
+        &self,
+        repo_slug: &str,
+    ) -> Result<Vec<rustodian_types::PullRequest>, rustodian_core::CoreError> {
         let url = format!("{}/repos/{}/pulls?state=open", self.api_base_url, repo_slug);
 
-        let mut req = self.client.get(&url).header(reqwest::header::USER_AGENT, "rustodian");
+        let mut req = self
+            .client
+            .get(&url)
+            .header(reqwest::header::USER_AGENT, "rustodian");
 
         if let Ok(token) = std::env::var("GITHUB_TOKEN") {
             req = req.bearer_auth(token);
@@ -156,7 +162,8 @@ impl rustodian_core::traits::PullRequestFetcher for GithubDownloader {
 
         if response.status() == reqwest::StatusCode::FORBIDDEN
             && let Some(limit) = response.headers().get("X-RateLimit-Remaining")
-            && limit.to_str().unwrap_or("") == "0" {
+            && limit.to_str().unwrap_or("") == "0"
+        {
             return Err(rustodian_core::CoreError::RateLimitExceeded);
         }
 
@@ -195,32 +202,37 @@ impl rustodian_core::traits::PullRequestFetcher for GithubDownloader {
             .await
             .map_err(|e| rustodian_core::CoreError::Internal(e.to_string()))?;
 
-        Ok(gh_prs.into_iter().map(|pr| rustodian_types::PullRequest {
-            number: pr.number,
-            title: pr.title,
-            author: pr.user.login,
-            branch: pr.head.ref_name,
-            url: pr.html_url,
-            updated_at: pr.updated_at,
-            is_draft: pr.draft,
-        }).collect())
+        Ok(gh_prs
+            .into_iter()
+            .map(|pr| rustodian_types::PullRequest {
+                number: pr.number,
+                title: pr.title,
+                author: pr.user.login,
+                branch: pr.head.ref_name,
+                url: pr.html_url,
+                updated_at: pr.updated_at,
+                is_draft: pr.draft,
+            })
+            .collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustodian_core::traits::PullRequestFetcher;
     use mockito::Server;
+    use rustodian_core::traits::PullRequestFetcher;
 
     #[tokio::test]
     async fn test_fetch_open_prs_success() {
         let mut server = Server::new_async().await;
 
-        let m = server.mock("GET", "/repos/drawmeanelephant/rustodian/pulls?state=open")
+        let m = server
+            .mock("GET", "/repos/drawmeanelephant/rustodian/pulls?state=open")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"
+            .with_body(
+                r#"
             [
                 {
                     "number": 42,
@@ -232,12 +244,16 @@ mod tests {
                     "draft": false
                 }
             ]
-            "#)
+            "#,
+            )
             .create_async()
             .await;
 
         let downloader = GithubDownloader::new().with_api_base_url(server.url());
-        let prs = downloader.fetch_open_prs("drawmeanelephant/rustodian").await.unwrap();
+        let prs = downloader
+            .fetch_open_prs("drawmeanelephant/rustodian")
+            .await
+            .unwrap();
 
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 42);
@@ -253,14 +269,18 @@ mod tests {
     async fn test_fetch_open_prs_rate_limit() {
         let mut server = Server::new_async().await;
 
-        let m = server.mock("GET", "/repos/drawmeanelephant/rustodian/pulls?state=open")
+        let m = server
+            .mock("GET", "/repos/drawmeanelephant/rustodian/pulls?state=open")
             .with_status(403)
             .with_header("X-RateLimit-Remaining", "0")
             .create_async()
             .await;
 
         let downloader = GithubDownloader::new().with_api_base_url(server.url());
-        let err = downloader.fetch_open_prs("drawmeanelephant/rustodian").await.unwrap_err();
+        let err = downloader
+            .fetch_open_prs("drawmeanelephant/rustodian")
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, rustodian_core::CoreError::RateLimitExceeded));
         m.assert_async().await;

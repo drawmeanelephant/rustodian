@@ -102,7 +102,10 @@ pub trait RunningProcess: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait PullRequestFetcher: Send + Sync {
-    async fn fetch_open_prs(&self, repo_slug: &str) -> Result<Vec<rustodian_types::PullRequest>, CoreError>;
+    async fn fetch_open_prs(
+        &self,
+        repo_slug: &str,
+    ) -> Result<Vec<rustodian_types::PullRequest>, CoreError>;
 }
 
 pub trait CommandRunner: Send + Sync {
