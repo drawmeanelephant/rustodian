@@ -212,7 +212,7 @@ mod tests {
             last_scanned_at: None,
             vcs: None,
             languages: vec![],
-            metadata: Default::default(),
+            metadata: rustodian_types::ProjectMetadata::default(),
         };
         store.save_project(&proj).unwrap();
 

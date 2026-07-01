@@ -492,7 +492,7 @@ mod tests {
             last_scanned_at: None,
             vcs: None,
             languages: vec![],
-            metadata: Default::default(),
+            metadata: rustodian_types::ProjectMetadata::default(),
         };
 
         // Initial save
@@ -515,7 +515,7 @@ mod tests {
         drop(conn);
 
         let err = store.get_project(&id).unwrap_err();
-        println!("{}", err.to_string());
+        println!("{err}");
         assert!(err.to_string().contains("invalid metadata JSON"));
     }
     use super::*;
