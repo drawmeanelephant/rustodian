@@ -100,6 +100,11 @@ pub trait RunningProcess: Send + Sync {
     fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>>;
 }
 
+#[async_trait::async_trait]
+pub trait PullRequestFetcher: Send + Sync {
+    async fn fetch_open_prs(&self, repo_slug: &str) -> Result<Vec<rustodian_types::PullRequest>, CoreError>;
+}
+
 pub trait CommandRunner: Send + Sync {
     fn spawn(&self, spec: CommandSpec) -> Result<Box<dyn RunningProcess>, CoreError>;
 }
