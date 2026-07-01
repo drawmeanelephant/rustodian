@@ -86,6 +86,20 @@ enum Commands {
         project: String,
     },
 
+    /// Purge build artifacts and cruft from a project
+    Janitor {
+        /// Project name or ID
+        project: String,
+
+        /// Do not actually delete anything, just report what would be deleted
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+        dry_run: bool,
+
+        /// Actually delete the cruft (disable dry-run)
+        #[arg(long, alias = "no-dry-run")]
+        purge: bool,
+    },
+
     /// Run a discovered command for a project
     Run {
         /// Project name or ID
@@ -179,6 +193,14 @@ fn main() -> Result<()> {
             }
         },
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
+        Commands::Janitor {
+            project,
+            dry_run,
+            purge,
+        } => {
+            let is_dry_run = dry_run && !purge;
+            commands::janitor::execute(&custodian, &project, is_dry_run, &cli.format)
+        }
         Commands::Run { project, command } => {
             commands::run::execute(&custodian, &project, &command)
         }
