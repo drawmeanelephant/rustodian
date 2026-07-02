@@ -194,9 +194,12 @@ fn parse_project_row(
 
 impl ProjectStore for SqliteStore {
     fn save_project(&self, project: &Project) -> Result<ProjectId, CoreError> {
-        let conn = self.get_conn()?;
+        let mut conn = self.get_conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| CoreError::Storage(format!("failed to begin transaction: {e}")))?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO projects (id, name, path, discovered_at, last_scanned_at, metadata_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(path) DO UPDATE SET
@@ -221,18 +224,31 @@ impl ProjectStore for SqliteStore {
         .map_err(|e| CoreError::Storage(format!("failed to save project: {e}")))?;
 
         // we'll update the project languages table
-        conn.execute(
+        tx.execute(
             "DELETE FROM project_languages WHERE project_id = ?1",
             params![project.id.to_string()],
         )
         .map_err(|e| CoreError::Storage(format!("failed to clean languages: {e}")))?;
 
-        for detection in &project.languages {
-            conn.execute(
+        {
+            let mut stmt = tx.prepare_cached(
                 "INSERT INTO project_languages (project_id, language, confidence) VALUES (?1, ?2, ?3)",
-                params![project.id.to_string(), detection.language.to_string(), detection.confidence.to_string()]
-            ).map_err(|e| CoreError::Storage(format!("failed to save project languages: {e}")))?;
+            ).map_err(|e| CoreError::Storage(format!("failed to prepare statement: {e}")))?;
+
+            for detection in &project.languages {
+                stmt.execute(params![
+                    project.id.to_string(),
+                    detection.language.to_string(),
+                    detection.confidence.to_string()
+                ])
+                .map_err(|e| {
+                    CoreError::Storage(format!("failed to save project languages: {e}"))
+                })?;
+            }
         }
+
+        tx.commit()
+            .map_err(|e| CoreError::Storage(format!("failed to commit transaction: {e}")))?;
 
         Ok(project.id.clone())
     }
