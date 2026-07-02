@@ -114,6 +114,20 @@ impl RemoteDownloader for GithubDownloader {
                 continue;
             }
 
+            // Security Fix: Prevent Path Traversal (Zip Slip)
+            // Ensure the path does not contain components that escape the intended directory
+            if stripped_path.components().any(|c| {
+                !matches!(
+                    c,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            }) {
+                return Err(rustodian_core::CoreError::Internal(format!(
+                    "Security violation: Path traversal detected in archive entry {:?}",
+                    path
+                )));
+            }
+
             if preserve_set.is_match(stripped_path) {
                 debug!("Preserving file matching pattern: {:?}", stripped_path);
                 continue;
