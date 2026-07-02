@@ -46,6 +46,9 @@ impl RemoteDownloader for GithubDownloader {
     ) -> Result<(), rustodian_core::CoreError> {
         info!("Downloading project {}", project.repo_slug);
 
+        let canonical_dest = dest_dir
+            .canonicalize()
+            .unwrap_or_else(|_| dest_dir.to_path_buf());
         let mut builder = GlobSetBuilder::new();
         for pat in preserve_patterns {
             if let Ok(glob) = Glob::new(pat) {
@@ -57,11 +60,16 @@ impl RemoteDownloader for GithubDownloader {
             .unwrap_or_else(|_| GlobSetBuilder::new().build().unwrap());
 
         // Try main then master
+        let dl_base = if self.api_base_url == "https://api.github.com" {
+            "https://github.com".to_string()
+        } else {
+            self.api_base_url.clone()
+        };
         let mut response = self
             .client
             .get(format!(
-                "https://github.com/{}/archive/refs/heads/main.tar.gz",
-                project.repo_slug
+                "{}/{}/archive/refs/heads/main.tar.gz",
+                dl_base, project.repo_slug
             ))
             .send()
             .await
@@ -71,8 +79,8 @@ impl RemoteDownloader for GithubDownloader {
             response = self
                 .client
                 .get(format!(
-                    "https://github.com/{}/archive/refs/heads/master.tar.gz",
-                    project.repo_slug
+                    "{}/{}/archive/refs/heads/master.tar.gz",
+                    dl_base, project.repo_slug
                 ))
                 .send()
                 .await
@@ -137,6 +145,18 @@ impl RemoteDownloader for GithubDownloader {
             if let Some(parent) = dest_path.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|e| rustodian_core::CoreError::Internal(e.to_string()))?;
+
+                // Security Fix: Prevent Zip Slip via symlinks
+                let canonical_parent = parent
+                    .canonicalize()
+                    .map_err(|e| rustodian_core::CoreError::Internal(e.to_string()))?;
+
+                if !canonical_parent.starts_with(&canonical_dest) {
+                    return Err(rustodian_core::CoreError::Internal(format!(
+                        "Security violation: Zip Slip path traversal detected in archive entry {:?}",
+                        path
+                    )));
+                }
             }
 
             entry
@@ -299,4 +319,91 @@ mod tests {
         assert!(matches!(err, rustodian_core::CoreError::RateLimitExceeded));
         m.assert_async().await;
     }
+}
+
+#[tokio::test]
+async fn test_download_and_extract_zip_slip_symlink() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let extract_dir = temp_dir.path().join("extract");
+    std::fs::create_dir_all(&extract_dir).unwrap();
+
+    // Target directory outside the extraction path (simulating a system dir)
+    let system_dir = temp_dir.path().join("system");
+    std::fs::create_dir_all(&system_dir).unwrap();
+
+    // Create a malicious tarball in memory
+    let mut tar_builder = tar::Builder::new(Vec::new());
+
+    // 1. Add a directory (this is usually stripped as root dir)
+    let mut header = tar::Header::new_gnu();
+    header.set_size(0);
+    header.set_entry_type(tar::EntryType::Directory);
+    tar_builder
+        .append_data(&mut header, "root/", &[][..])
+        .unwrap();
+
+    // 2. Add a symlink named 'foo' pointing to our system_dir
+    let mut header = tar::Header::new_gnu();
+    header.set_size(0);
+    header.set_entry_type(tar::EntryType::Symlink);
+    header.set_link_name(system_dir.to_str().unwrap()).unwrap();
+    tar_builder
+        .append_data(&mut header, "root/foo", &[][..])
+        .unwrap();
+
+    // 3. Add a file 'bar' inside the symlinked directory 'foo'
+    // If Zip Slip is possible, this will extract to system_dir/bar
+    let mut header = tar::Header::new_gnu();
+    header.set_size(12);
+    header.set_entry_type(tar::EntryType::Regular);
+    tar_builder
+        .append_data(&mut header, "root/foo/bar", &b"pwned content"[..])
+        .unwrap();
+
+    let tar_data = tar_builder.into_inner().unwrap();
+
+    // Gzip it
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&tar_data).unwrap();
+    let tar_gz_data = encoder.finish().unwrap();
+
+    // Mock the server
+    let mut server = mockito::Server::new_async().await;
+    let _m = server
+        .mock(
+            "GET",
+            "/drawmeanelephant/rustodian/archive/refs/heads/main.tar.gz",
+        )
+        .with_status(200)
+        .with_body(tar_gz_data)
+        .create_async()
+        .await;
+
+    let downloader = GithubDownloader::new().with_api_base_url(server.url());
+
+    // Try to download and extract
+    let project = rustodian_types::RemoteProject {
+        repo_slug: "drawmeanelephant/rustodian".to_string(),
+        preserve_patterns: vec![],
+    };
+
+    let result = downloader
+        .download_and_extract(&project, &extract_dir, &[])
+        .await;
+
+    // Ensure it failed with a security error
+    println!("Result: {:?}", result);
+    assert!(
+        result.is_err(),
+        "Extraction should have failed due to Zip Slip protection"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("Security violation") || err_msg.contains("Zip Slip"));
+
+    // Ensure the file was NOT written to the system dir
+    assert!(
+        !system_dir.join("bar").exists(),
+        "Zip slip attack succeeded!"
+    );
 }
