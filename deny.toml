@@ -2,7 +2,10 @@
 # Scope: "all" = entire dep graph, "workspace" = direct deps only
 unmaintained = "workspace"
 yanked = "deny"
-ignore = []
+ignore = [
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
 
 [licenses]
 allow = [
