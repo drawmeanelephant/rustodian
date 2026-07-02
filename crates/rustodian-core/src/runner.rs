@@ -163,7 +163,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_kill_exited_process() {
+    fn test_kill_exited_process() -> Result<(), crate::error::CoreError> {
         let runner = DefaultCommandRunner;
         let spec = CommandSpec {
             program: "true".to_string(),
@@ -174,15 +174,11 @@ mod tests {
             capture_output: false,
         };
 
-        let mut child = runner.spawn(spec).unwrap();
-        child.wait().unwrap(); // Wait for it to exit
+        let mut child = runner.spawn(spec)?;
+        child.wait()?; // Wait for it to exit
 
         // This should not error even if the process is dead
-        let kill_result = child.kill();
-        assert!(
-            kill_result.is_ok(),
-            "Killing an exited process should not return an error, got: {:?}",
-            kill_result.unwrap_err()
-        );
+        child.kill()?;
+        Ok(())
     }
 }
