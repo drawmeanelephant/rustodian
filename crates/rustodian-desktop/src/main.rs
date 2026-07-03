@@ -22,17 +22,18 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Rustodian Desktop",
         options,
-        Box::new(|cc| match setup_db() {
+        Box::new(|_cc| match setup_db() {
             Ok(s) => {
                 let store = Arc::new(s);
 
                 let (gui_tx, worker_rx) = std::sync::mpsc::channel();
                 let (worker_tx, gui_rx) = std::sync::mpsc::channel();
 
-                let ctx_clone = cc.egui_ctx.clone();
+                let (repaint_tx, repaint_rx) = std::sync::mpsc::channel();
                 let store_clone = store.clone();
+
                 std::thread::spawn(move || {
-                    worker::run_worker(store_clone, &worker_rx, &worker_tx, &ctx_clone);
+                    worker::run_worker(store_clone, &worker_rx, &worker_tx, &repaint_tx);
                 });
 
                 let default_scan_root = dirs::home_dir()
@@ -45,6 +46,7 @@ fn main() -> eframe::Result {
 
                 let mut app = RustodianApp {
                     worker_tx: Some(gui_tx),
+                    repaint_rx: Some(repaint_rx),
                     worker_rx: Some(gui_rx),
                     scan_root_input,
                     ..Default::default()
@@ -104,6 +106,7 @@ struct RustodianApp {
     // Channels to/from worker
     worker_tx: Option<std::sync::mpsc::Sender<GuiMessage>>,
     worker_rx: Option<std::sync::mpsc::Receiver<WorkerMessage>>,
+    repaint_rx: Option<std::sync::mpsc::Receiver<()>>,
 
     // Command running state
     running_cmd_name: Option<String>,
@@ -362,6 +365,11 @@ impl eframe::App for RustodianApp {
             return;
         }
         let ctx = ui.ctx().clone();
+        if let Some(rx) = &self.repaint_rx {
+            while let Ok(()) = rx.try_recv() {
+                ctx.request_repaint();
+            }
+        }
         self.process_messages();
 
         // Throttle repaints slightly to not hog CPU when streaming logs

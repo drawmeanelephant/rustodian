@@ -58,7 +58,7 @@ pub fn run_worker(
     store: Arc<SqliteStore>,
     rx: &std::sync::mpsc::Receiver<GuiMessage>,
     tx: &std::sync::mpsc::Sender<WorkerMessage>,
-    ctx: &eframe::egui::Context,
+    repaint_tx: &std::sync::mpsc::Sender<()>,
 ) {
     let mut state = WorkerState {
         store,
@@ -73,7 +73,9 @@ pub fn run_worker(
             GuiMessage::LoadProjects => {
                 let res = state.store.list_projects().map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::ProjectsLoaded(res));
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
             GuiMessage::RunCommand {
                 project_id,
@@ -107,7 +109,9 @@ pub fn run_worker(
                     exit_status: None,
                     log_buffer: log_buffer.clone(),
                 });
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
 
                 let spec = CommandSpec {
                     program: command_str.clone(),
@@ -159,7 +163,7 @@ pub fn run_worker(
                         let tx_clone = tx.clone();
                         let store_clone = state.store.clone();
                         let cmd_name = command_name.clone();
-                        let ctx_clone = ctx.clone();
+                        let repaint_tx_clone = repaint_tx.clone();
                         let should_kill_clone = state.should_kill.clone();
                         let process_exited_clone = state.process_exited.clone();
 
@@ -208,7 +212,9 @@ pub fn run_worker(
                                 log_buffer: log_buffer_clone,
                             });
                             *is_running_clone.lock().unwrap() = false;
-                            ctx_clone.request_repaint();
+                            if let Err(e) = repaint_tx_clone.send(()) {
+                                tracing::error!("Worker channel closed unexpectedly: {e}");
+                            }
                         });
                     }
                     Err(e) => {
@@ -220,7 +226,9 @@ pub fn run_worker(
                             log_buffer,
                         });
                         *state.is_running.lock().unwrap() = false;
-                        ctx.request_repaint();
+                        if let Err(e) = repaint_tx.send(()) {
+                            tracing::error!("Worker channel closed unexpectedly: {e}");
+                        }
                     }
                 }
             }
@@ -242,7 +250,9 @@ pub fn run_worker(
                     project_path,
                     available_docs,
                 });
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
             GuiMessage::CheckDocFreshness { path, known_mtime } => {
                 let current_mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -251,7 +261,9 @@ pub fn run_worker(
                 } else {
                     let _ = tx.send(WorkerMessage::DocStale { path });
                 }
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
             GuiMessage::ScanProjects { path } => {
                 let scanner = rustodian_scanner::FsScanner;
@@ -269,7 +281,9 @@ pub fn run_worker(
                 let _ = tx.send(WorkerMessage::ScanComplete(res));
                 let list_res = state.store.list_projects().map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::ProjectsLoaded(list_res));
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
 
             GuiMessage::PurgeCruft {
@@ -297,7 +311,9 @@ pub fn run_worker(
                 };
 
                 let _ = tx.send(WorkerMessage::CruftPurged(res));
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
             GuiMessage::GetDirtyFiles { project_path } => {
                 let git = rustodian_git::Git2Inspector;
@@ -305,7 +321,9 @@ pub fn run_worker(
                     rustodian_core::traits::GitInspector::get_dirty_files(&git, &project_path)
                         .map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::DirtyFilesResult(res));
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
             GuiMessage::SaveSetting { key, value } => {
                 let _ = state.store.set_setting(&key, &value);
@@ -315,7 +333,7 @@ pub fn run_worker(
                 let content = fs::read_to_string(&path)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
 
-                let mut hasher = ahash::AHasher::default();
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 std::hash::Hash::hash(&content, &mut hasher);
                 let content_hash = std::hash::Hasher::finish(&hasher);
 
@@ -332,7 +350,9 @@ pub fn run_worker(
                         content_hash,
                     });
                 }
-                ctx.request_repaint();
+                if let Err(e) = repaint_tx.send(()) {
+                    tracing::error!("Worker channel closed unexpectedly: {e}");
+                }
             }
         }
     }
