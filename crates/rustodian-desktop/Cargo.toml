@@ -27,6 +27,9 @@ rfd = "0.17.2"
 
 # High-octane UI integration replace eframe
 slint = "1.9"
+eframe = "0.35.0"
+ahash = "0.8.12"
+serde_json.workspace = true
 
 [build-dependencies]
 slint-build = "1.9"

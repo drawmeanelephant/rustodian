@@ -830,3 +830,52 @@ impl RustodianApp {
         });
     }
 }
+
+pub mod ui_mapping {
+    use rustodian_types::{Project, ProjectCommand};
+    use slint::{ModelRc, SharedString, VecModel};
+    use std::rc::Rc;
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct SlintProject {
+        pub name: SharedString,
+        pub path: SharedString,
+        pub description: SharedString,
+        pub commands: ModelRc<SlintProjectCommand>,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct SlintProjectCommand {
+        pub name: SharedString,
+        pub description: SharedString,
+        pub command: SharedString,
+        pub source: SharedString,
+    }
+
+    pub fn map_project(p: &Project) -> SlintProject {
+        let commands = map_commands(&p.metadata.commands);
+        let path_str = p.path.to_string_lossy().into_owned();
+        SlintProject {
+            name: SharedString::from(p.name.as_str()),
+            path: SharedString::from(path_str.as_str()),
+            description: SharedString::from(p.metadata.description.as_deref().unwrap_or("")),
+            commands,
+        }
+    }
+
+    pub fn map_commands(commands: &[ProjectCommand]) -> ModelRc<SlintProjectCommand> {
+        let vec: Vec<SlintProjectCommand> = commands
+            .iter()
+            .map(|c| SlintProjectCommand {
+                name: SharedString::from(c.name.as_str()),
+                description: SharedString::from(c.description.as_deref().unwrap_or("")),
+                command: SharedString::from(c.command.as_str()),
+                source: SharedString::from(c.source.as_str()),
+            })
+            .collect();
+        ModelRc::from(Rc::new(VecModel::from(vec)))
+    }
+}
+
+#[cfg(test)]
+mod ui_mapping_tests;
