@@ -1,5 +1,7 @@
 import { Button, VerticalBox, LineEdit, ScrollView } from "std-widgets.slint";
 
+enum PipelinePage { Ingest, Execution }
+
 component SidebarButton inherits Rectangle {
     in property <string> text;
     in property <bool> active;
@@ -29,8 +31,7 @@ export component PipelineWindow inherits Window {
     background: #121218;
 
     // View states for the printer panel style layout
-    enum PipelinePage { ingest, execution }
-    in-out property <PipelinePage> active-page: PipelinePage.ingest;
+    in-out property <PipelinePage> active-page: PipelinePage.Ingest;
 
     // Core data hooks
     in-out property <string> repo-slug;
@@ -63,13 +64,13 @@ export component PipelineWindow inherits Window {
 
                 SidebarButton {
                     text: "📥 Ingest Package";
-                    active: root.active-page == PipelinePage.ingest;
-                    clicked => { root.active-page = PipelinePage.ingest; }
+                    active: root.active-page == PipelinePage.Ingest;
+                    clicked => { root.active-page = PipelinePage.Ingest; }
                 }
                 SidebarButton {
                     text: "⚙️ Run & Export";
-                    active: root.active-page == PipelinePage.execution;
-                    clicked => { root.active-page = PipelinePage.execution; }
+                    active: root.active-page == PipelinePage.Execution;
+                    clicked => { root.active-page = PipelinePage.Execution; }
                 }
             }
         }
@@ -79,7 +80,7 @@ export component PipelineWindow inherits Window {
             padding: 24px;
 
             // PANEL A: INGEST
-            if root.active-page == PipelinePage.ingest : VerticalBox {
+            if root.active-page == PipelinePage.Ingest : VerticalBox {
                 spacing: 16px;
                 alignment: start;
 
@@ -100,7 +101,7 @@ export component PipelineWindow inherits Window {
             }
 
             // PANEL B: EXECUTION & SNAPSHOT EXPORT
-            if root.active-page == PipelinePage.execution : VerticalBox {
+            if root.active-page == PipelinePage.Execution : VerticalBox {
                 spacing: 16px;
 
                 HorizontalLayout {
