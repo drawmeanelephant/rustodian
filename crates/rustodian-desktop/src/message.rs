@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Message passing types for the Desktop GUI.
 
 use std::path::PathBuf;
