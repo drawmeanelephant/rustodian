@@ -1,7 +1,6 @@
 #![allow(clippy::collapsible_if)]
 slint::include_modules!();
 
-
 use anyhow::{Context, Result};
 use eframe::egui;
 use rustodian_storage::SqliteStore;
@@ -839,23 +838,21 @@ pub fn bind_pipeline_worker_stream(
 ) {
     std::thread::spawn(move || {
         while let Ok(msg) = rx.recv() {
-            match msg {
-                WorkerMessage::CommandStatus {
-                    is_running,
-                    log_buffer,
-                    ..
-                } => {
-                    let snapshot = log_buffer.snapshot();
-                    let ui_handle_clone = ui_handle.clone();
+            if let WorkerMessage::CommandStatus {
+                is_running,
+                log_buffer,
+                ..
+            } = msg
+            {
+                let snapshot = log_buffer.snapshot();
+                let ui_handle_clone = ui_handle.clone();
 
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui_handle_clone.upgrade() {
-                            ui.set_stream_logs(snapshot.into());
-                            ui.set_working(is_running);
-                        }
-                    });
-                }
-                _ => {}
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle_clone.upgrade() {
+                        ui.set_stream_logs(snapshot.into());
+                        ui.set_working(is_running);
+                    }
+                });
             }
         }
     });

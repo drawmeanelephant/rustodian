@@ -1,3 +1,1 @@
-sed -i 's/metadata: Default::default()/metadata: rustodian_types::ProjectMetadata::default()/g' crates/rustodian-storage/src/log_store.rs
-sed -i 's/metadata: Default::default()/metadata: rustodian_types::ProjectMetadata::default()/g' crates/rustodian-storage/src/store.rs
-sed -i 's/println!("{}", err.to_string());/println!("{}", err);/g' crates/rustodian-storage/src/store.rs
+cat crates/rustodian-desktop/src/main.rs | sed -n '836,860p'
