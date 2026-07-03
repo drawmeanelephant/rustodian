@@ -21,6 +21,11 @@ allow = [
     "OFL-1.1",
     "Ubuntu-font-1.0",
     "CC0-1.0",
+    "GPL-3.0-only",
+    "LicenseRef-Slint-Royalty-free-2.0",
+    "LicenseRef-Slint-Software-3.0",
+    "Unlicense",
+    "NCSA",
     "CDLA-Permissive-2.0",
 ]
 
