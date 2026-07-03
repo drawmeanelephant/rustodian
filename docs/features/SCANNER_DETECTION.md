@@ -1,14 +1,16 @@
+# Scanner and Detection
+
 ## Directory Traversal (`ignore` vs `walkdir`)
 
-Rustodian uses the `ignore` crate rather than `walkdir` for filesystem traversal. This is crucial because `ignore` automatically respects `.gitignore` rules. Without this, the scanner would waste significant I/O and processing time descending into massive generated directories like `node_modules`, `target`, or `.venv`. This design choice avoids the need to maintain hardcoded manual exclusion lists, ensuring discovery focuses only on tracked source code.
+Rustodian uses the `ignore` crate instead of `walkdir` for filesystem traversal. This is crucial because `ignore` automatically respects `.gitignore` and `.ignore` rules out of the box. By doing so, the scanner effortlessly skips massive, irrelevant generated directories. For example, without `ignore`, the scanner would waste significant I/O and processing time descending into deeply nested `node_modules`, `target`, or `.venv` folders, parsing thousands of build artifacts. This design choice prevents performance bottlenecks and ensures discovery focuses exclusively on tracked source code without requiring manual exclusion lists.
 
 ## Performance: `ScanConfig.max_depth`
 
-The `ScanConfig.max_depth` setting bounds the recursion depth of the traversal. In deep monorepos with hundreds of nested directories, traversing the entire tree can be prohibitively slow. By limiting the max depth, we avoid unbounded scan times while still capturing typical project structures. A depth of 0 halts traversal entirely, returning empty results.
+The `ScanConfig.max_depth` setting bounds traversal recursion depth. In deep monorepos with hundreds of nested directories, scanning the entire tree can be prohibitively slow. Limiting maximum depth prevents unbounded scan times while reliably capturing typical project structures. A depth of 0 halts traversal entirely, returning empty results.
 
 ## Language Detection Pattern
 
-Language detection is handled by pure functions in `detect_languages` (e.g., `detect_rust`, `detect_python`). Each directory is examined for specific markers to identify its primary language(s). These detectors run independently, allowing a single directory to be recognized as a polyglot project.
+Language detection is handled by pure functions in `detect_languages` (e.g., `detect_rust`, `detect_python`). Each directory is examined for specific markers to identify its primary language(s). These detectors run independently, meaning a single directory containing both `Cargo.toml` and `package.json` will be correctly recognized as a polyglot project, yielding independent detections for both languages without reducing either's confidence.
 
 ### Markers and Confidence Table
 
@@ -16,7 +18,7 @@ Language detection is handled by pure functions in `detect_languages` (e.g., `de
 |----------|----------------|------------------|
 | **Rust** | `Cargo.toml`, `Cargo.lock` | **High:** `Cargo.toml` exists. **Medium:** Only `Cargo.lock` exists. |
 | **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only lock/config exists. |
-| **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Always High if any marker matched. |
+| **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Always High if any marker matched (including lockfiles only). |
 | **Go**   | `go.mod`, `go.sum` | **High:** Always High if any marker matched. |
 | **Ruby** | `Gemfile`, `*.gemspec`, `Gemfile.lock` | **High:** `Gemfile` or `*.gemspec` exists. **Medium:** Only `Gemfile.lock` exists.|
 | **Zig**  | `build.zig`, `build.zig.zon` | **High:** `build.zig` exists. **Medium:** Only `build.zig.zon` exists. |
@@ -25,12 +27,12 @@ Language detection is handled by pure functions in `detect_languages` (e.g., `de
 
 The `DetectionConfidence` enum categorizes the strength of evidence:
 
-- **High:** A definitive manifest file is present (e.g., `Cargo.toml`, `package.json`, `go.mod`). This strongly indicates the directory is the root of a project.
-- **Medium:** Supporting evidence exists, but it's not definitive. For example, finding a `Cargo.lock` without a `Cargo.toml` might indicate a sub-crate, or a `requirements.txt` might just be a loosely tracked list of dependencies rather than a full project structure.
-- **Low:** Weak signals like just file extensions (though currently not utilized in the primary detectors, the type exists for future heuristics where multiple competing manifest files or only source files might provide low confidence).
+- **High:** A definitive manifest file is present (e.g., `Cargo.toml`, `package.json`, `go.mod`). This strongly indicates the directory is a project root. Note that for Node and Go, confidence is always high even if only lockfiles are found.
+- **Medium:** Supporting evidence exists, but is not definitive. Finding a `Cargo.lock` without a `Cargo.toml` might indicate a sub-crate, while a standalone `requirements.txt` might just be a loosely tracked dependency list.
+- **Low:** Reserved for weak signals (like file extensions). Currently unused by primary detectors, but designed for future heuristics such as when only source files are present without standard manifests.
 
 ## Self-Healing Garbage Collection
 
-During every scan (`Custodian::scan`), Rustodian performs a self-healing garbage collection pass. It iterates through all tracked projects in the database. If a tracked project's path no longer exists on disk, it is purged from the database.
+During every scan (`Custodian::scan`), Rustodian performs a self-healing garbage collection pass to keep the database synchronized with the filesystem. It iterates over all tracked projects; if a project's path no longer exists on disk, it is purged from the database.
 
-This runs on every scan, rather than as a separate command, because a primary goal of a scan is to synchronize the database with the reality of the filesystem. By piggybacking on the scan operation, the database seamlessly self-corrects when projects are moved or deleted, ensuring the index remains accurate without requiring the user to run a separate manual cleanup step.
+Because the `project_logs` table (which stores audit history like janitor runs) is defined with a foreign key featuring `ON DELETE CASCADE` referencing the `projects` table, removing the purged project's row automatically deletes all associated historical logs. This ensures no orphaned log records are left behind. Running this process implicitly during every scan allows the database to seamlessly self-correct without requiring a manual cleanup step.
