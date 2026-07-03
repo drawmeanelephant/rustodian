@@ -9,6 +9,7 @@ use rustodian_core::log_buffer::LogBuffer;
 use rustodian_types::{Project, ProjectId};
 
 /// Messages sent from the GUI thread to the Background Worker thread.
+#[allow(dead_code)]
 pub enum GuiMessage {
     /// Load all projects from the database.
     LoadProjects,
