@@ -1,0 +1,141 @@
+import { Button, VerticalBox, LineEdit, ScrollView } from "std-widgets.slint";
+
+component SidebarButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+
+    background: active ? #2a2a3a : transparent;
+    border-radius: 8px;
+    height: 44px;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        color: root.active ? #ffffff : #a0a0b0;
+        x: 16px;
+        font-weight: root.active ? 700 : 400;
+        vertical-alignment: center;
+    }
+}
+
+export component PipelineWindow inherits Window {
+    title: "Rustodian Jules Context Engine";
+    preferred-width: 800px;
+    preferred-height: 520px;
+    background: #121218;
+
+    // View states for the printer panel style layout
+    enum PipelinePage { ingest, execution }
+    in-out property <PipelinePage> active-page: PipelinePage.ingest;
+
+    // Core data hooks
+    in-out property <string> repo-slug;
+    in-out property <string> target-project;
+    in property <string> stream-logs;
+    in property <bool> working: false;
+
+    callback trigger-ingest(string);
+    callback trigger-agent-export(string);
+
+    HorizontalLayout {
+        // Left Sidebar — Quick View Control
+        Rectangle {
+            width: 200px;
+            background: #1a1a24;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: "🏛️ PIPELINE";
+                    font-size: 16px;
+                    font-weight: 900;
+                    color: #ffffff;
+                }
+
+                Rectangle { height: 20px; } // Spacer
+
+                SidebarButton {
+                    text: "📥 Ingest Package";
+                    active: root.active-page == PipelinePage.ingest;
+                    clicked => { root.active-page = PipelinePage.ingest; }
+                }
+                SidebarButton {
+                    text: "⚙️ Run & Export";
+                    active: root.active-page == PipelinePage.execution;
+                    clicked => { root.active-page = PipelinePage.execution; }
+                }
+            }
+        }
+
+        // Right Viewport Panel
+        Rectangle {
+            padding: 24px;
+
+            // PANEL A: INGEST
+            if root.active-page == PipelinePage.ingest : VerticalBox {
+                spacing: 16px;
+                alignment: start;
+
+                Text { text: "Grab Package Asset"; font-size: 20px; font-weight: 700; color: #fff; }
+
+                LineEdit {
+                    placeholder-text: "username/repository-slug";
+                    text <=> root.repo-slug;
+                    height: 40px;
+                }
+
+                Button {
+                    text: root.working ? "Pulling Repo Down..." : "Fetch & Sync Remote Workspace";
+                    enabled: !root.working;
+                    height: 44px;
+                    clicked => { root.trigger-ingest(root.repo-slug); }
+                }
+            }
+
+            // PANEL B: EXECUTION & SNAPSHOT EXPORT
+            if root.active-page == PipelinePage.execution : VerticalBox {
+                spacing: 16px;
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text { text: "Execute & Export Context"; font-size: 20px; font-weight: 700; color: #fff; }
+                }
+
+                LineEdit {
+                    placeholder-text: "Active workspace filter query";
+                    text <=> root.target-project;
+                }
+
+                Button {
+                    text: "⚡ Run Environment & Generate RAG Markdown";
+                    primary: true;
+                    height: 48px;
+                    clicked => { root.trigger-agent-export(root.target-project); }
+                }
+
+                Text { text: "Live Output Log Stream:"; color: #a0a0b0; }
+
+                ScrollView {
+                    Rectangle {
+                        background: #0b0b0f;
+                        border-radius: 6px;
+                        padding: 12px;
+                        Text {
+                            text: root.stream-logs;
+                            font-family: "monospace";
+                            color: #a3be8c;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
