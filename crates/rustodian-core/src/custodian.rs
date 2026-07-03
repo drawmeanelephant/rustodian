@@ -223,14 +223,14 @@ impl Custodian {
             }));
         }
 
-        let exit_code = child.wait()?;
-
         if let Some(h) = stdout_handle {
-            let _ = h.join();
+            h.join().expect("reader thread panicked");
         }
         if let Some(h) = stderr_handle {
-            let _ = h.join();
+            h.join().expect("reader thread panicked");
         }
+
+        let exit_code = child.wait()?;
 
         let full_log = log_buffer.snapshot();
 
@@ -321,5 +321,117 @@ impl Custodian {
 
 #[cfg(test)]
 mod tests {
-    // Future: mock-based tests for Custodian orchestration
+    use super::*;
+    use crate::runner::DefaultCommandRunner;
+    use crate::traits::{DiscoveredProject, GitInspector, ProjectScanner, ProjectStore};
+    use rustodian_types::{ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord, VcsInfo};
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    struct MockStore;
+    impl ProjectStore for MockStore {
+        fn save_project(&self, _project: &Project) -> Result<ProjectId, CoreError> {
+            Ok(ProjectId::new())
+        }
+        fn get_project(&self, _id: &ProjectId) -> Result<Option<Project>, CoreError> {
+            Ok(None)
+        }
+        fn list_projects(&self) -> Result<Vec<Project>, CoreError> {
+            Ok(vec![])
+        }
+        fn delete_project(&self, _id: &ProjectId) -> Result<bool, CoreError> {
+            Ok(true)
+        }
+        fn find_by_path(&self, _path: &Path) -> Result<Option<Project>, CoreError> {
+            Ok(None)
+        }
+        fn save_scan(&self, _scan: &ScanRecord) -> Result<ScanId, CoreError> {
+            Ok(ScanId::new())
+        }
+        fn get_latest_scan(&self) -> Result<Option<ScanRecord>, CoreError> {
+            Ok(None)
+        }
+        fn save_log(&self, _log: &ProjectLog) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn list_logs(
+            &self,
+            _project_id: &str,
+            _limit: usize,
+        ) -> Result<Vec<ProjectLog>, CoreError> {
+            Ok(vec![])
+        }
+        fn get_log(&self, _id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn get_latest_log(&self, _project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+    }
+
+    struct MockScanner;
+    impl ProjectScanner for MockScanner {
+        fn scan(
+            &self,
+            _root: &Path,
+            _config: &ScanConfig,
+        ) -> Result<Vec<DiscoveredProject>, CoreError> {
+            Ok(vec![])
+        }
+    }
+
+    struct MockGit;
+    impl GitInspector for MockGit {
+        fn inspect(&self, _path: &Path) -> Result<Option<VcsInfo>, CoreError> {
+            Ok(None)
+        }
+        fn get_dirty_files(&self, _project_path: &Path) -> Result<Vec<PathBuf>, CoreError> {
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn test_large_output_no_deadlock() {
+        let store = MockStore;
+        let scanner = MockScanner;
+        let git = MockGit;
+        let runner = DefaultCommandRunner;
+
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(scanner),
+            Box::new(git),
+            Box::new(runner),
+        );
+
+        let project = Project {
+            id: ProjectId::new(),
+            name: "test_deadlock".to_string(),
+            path: PathBuf::from("."),
+            languages: vec![],
+            vcs: None,
+            discovered_at: chrono::Utc::now(),
+            last_scanned_at: None,
+            metadata: rustodian_types::ProjectMetadata::default(),
+        };
+
+        // Generate > 100KB of stdout to trigger the pipe buffer limit
+        // Use a simpler test program string
+        let spec_program = if cfg!(unix) {
+            "for i in $(seq 1 15000); do echo '1234567890'; done"
+        } else {
+            "FOR /L %i IN (1,1,15000) DO echo 1234567890"
+        };
+
+        let result = custodian.run_and_log_command(
+            &project,
+            "test_cmd",
+            spec_program,
+            true, // use_shell = true
+            std::collections::HashMap::new(),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some(0));
+    }
 }
