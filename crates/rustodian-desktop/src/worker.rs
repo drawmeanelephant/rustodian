@@ -58,7 +58,7 @@ pub fn run_worker(
     store: Arc<SqliteStore>,
     rx: &std::sync::mpsc::Receiver<GuiMessage>,
     tx: &std::sync::mpsc::Sender<WorkerMessage>,
-    ctx: &eframe::egui::Context,
+
 ) {
     let mut state = WorkerState {
         store,
@@ -73,8 +73,7 @@ pub fn run_worker(
             GuiMessage::LoadProjects => {
                 let res = state.store.list_projects().map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::ProjectsLoaded(res));
-                ctx.request_repaint();
-            }
+                            }
             GuiMessage::RunCommand {
                 project_id,
                 project_path,
@@ -107,7 +106,6 @@ pub fn run_worker(
                     exit_status: None,
                     log_buffer: log_buffer.clone(),
                 });
-                ctx.request_repaint();
 
                 let spec = CommandSpec {
                     program: command_str.clone(),
@@ -159,8 +157,7 @@ pub fn run_worker(
                         let tx_clone = tx.clone();
                         let store_clone = state.store.clone();
                         let cmd_name = command_name.clone();
-                        let ctx_clone = ctx.clone();
-                        let should_kill_clone = state.should_kill.clone();
+                                                let should_kill_clone = state.should_kill.clone();
                         let process_exited_clone = state.process_exited.clone();
 
                         // Wait thread
@@ -208,8 +205,7 @@ pub fn run_worker(
                                 log_buffer: log_buffer_clone,
                             });
                             *is_running_clone.lock().unwrap() = false;
-                            ctx_clone.request_repaint();
-                        });
+                                                    });
                     }
                     Err(e) => {
                         log_buffer.push_line(format!("Failed to spawn process: {e}"));
@@ -220,8 +216,7 @@ pub fn run_worker(
                             log_buffer,
                         });
                         *state.is_running.lock().unwrap() = false;
-                        ctx.request_repaint();
-                    }
+                                            }
                 }
             }
             GuiMessage::KillCommand => {
@@ -242,8 +237,7 @@ pub fn run_worker(
                     project_path,
                     available_docs,
                 });
-                ctx.request_repaint();
-            }
+                            }
             GuiMessage::CheckDocFreshness { path, known_mtime } => {
                 let current_mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
                 if known_mtime == current_mtime {
@@ -251,8 +245,7 @@ pub fn run_worker(
                 } else {
                     let _ = tx.send(WorkerMessage::DocStale { path });
                 }
-                ctx.request_repaint();
-            }
+                            }
             GuiMessage::ScanProjects { path } => {
                 let scanner = rustodian_scanner::FsScanner;
                 let git = rustodian_git::Git2Inspector;
@@ -269,8 +262,7 @@ pub fn run_worker(
                 let _ = tx.send(WorkerMessage::ScanComplete(res));
                 let list_res = state.store.list_projects().map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::ProjectsLoaded(list_res));
-                ctx.request_repaint();
-            }
+                            }
 
             GuiMessage::PurgeCruft {
                 project_id,
@@ -297,16 +289,14 @@ pub fn run_worker(
                 };
 
                 let _ = tx.send(WorkerMessage::CruftPurged(res));
-                ctx.request_repaint();
-            }
+                            }
             GuiMessage::GetDirtyFiles { project_path } => {
                 let git = rustodian_git::Git2Inspector;
                 let res =
                     rustodian_core::traits::GitInspector::get_dirty_files(&git, &project_path)
                         .map_err(|e| e.to_string());
                 let _ = tx.send(WorkerMessage::DirtyFilesResult(res));
-                ctx.request_repaint();
-            }
+                            }
             GuiMessage::SaveSetting { key, value } => {
                 let _ = state.store.set_setting(&key, &value);
             }
@@ -315,7 +305,7 @@ pub fn run_worker(
                 let content = fs::read_to_string(&path)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
 
-                let mut hasher = ahash::AHasher::default();
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 std::hash::Hash::hash(&content, &mut hasher);
                 let content_hash = std::hash::Hasher::finish(&hasher);
 
@@ -332,8 +322,7 @@ pub fn run_worker(
                         content_hash,
                     });
                 }
-                ctx.request_repaint();
-            }
+                            }
         }
     }
 }
