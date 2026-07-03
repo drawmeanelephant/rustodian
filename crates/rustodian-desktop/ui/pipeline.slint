@@ -1,6 +1,6 @@
-import { Button, VerticalBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, LineEdit, ScrollView, StandardListView } from "std-widgets.slint";
 
-enum PipelinePage { Ingest, Execution }
+enum PipelinePage { Ingest, Execution, Details, Tasks }
 
 component SidebarButton inherits Rectangle {
     in property <string> text;
@@ -72,6 +72,16 @@ export component PipelineWindow inherits Window {
                     active: root.active-page == PipelinePage.Execution;
                     clicked => { root.active-page = PipelinePage.Execution; }
                 }
+                SidebarButton {
+                    text: "🔍 Details";
+                    active: root.active-page == PipelinePage.Details;
+                    clicked => { root.active-page = PipelinePage.Details; }
+                }
+                SidebarButton {
+                    text: "📋 Tasks";
+                    active: root.active-page == PipelinePage.Tasks;
+                    clicked => { root.active-page = PipelinePage.Tasks; }
+                }
             }
         }
 
@@ -133,6 +143,69 @@ export component PipelineWindow inherits Window {
                             font-family: "monospace";
                             color: #a3be8c;
                             wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+            // PANEL C: DETAILS
+            if root.active-page == PipelinePage.Details : HorizontalLayout {
+                spacing: 16px;
+
+                StandardListView {
+                    width: 200px;
+                    model: [{ text: "Project A" }, { text: "Project B" }, { text: "Project C" }];
+                }
+
+                Rectangle {
+                    background: #1a1a24;
+                    border-radius: 8px;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
+                        Text { text: "Project Metadata Placeholder"; font-size: 18px; font-weight: 700; color: #fff; }
+                        Text { text: "Select a project to view its details, context, and configurations here."; color: #a0a0b0; wrap: word-wrap; }
+                    }
+                }
+            }
+
+            // PANEL D: TASKS
+            if root.active-page == PipelinePage.Tasks : VerticalBox {
+                spacing: 16px;
+
+                Text { text: "Available Tasks"; font-size: 20px; font-weight: 700; color: #fff; }
+
+                HorizontalLayout {
+                    spacing: 16px;
+                    Rectangle {
+                        background: #2a2a3a;
+                        border-radius: 6px;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 4px;
+                            Text { text: "Task: Build"; font-weight: 700; color: #fff; }
+                            Text { text: "cargo build"; color: #a3be8c; font-family: "monospace"; }
+                        }
+                    }
+                    Rectangle {
+                        background: #2a2a3a;
+                        border-radius: 6px;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 4px;
+                            Text { text: "Task: Test"; font-weight: 700; color: #fff; }
+                            Text { text: "cargo test"; color: #a3be8c; font-family: "monospace"; }
+                        }
+                    }
+                    Rectangle {
+                        background: #2a2a3a;
+                        border-radius: 6px;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 4px;
+                            Text { text: "Task: Lint"; font-weight: 700; color: #fff; }
+                            Text { text: "cargo clippy"; color: #a3be8c; font-family: "monospace"; }
                         }
                     }
                 }
