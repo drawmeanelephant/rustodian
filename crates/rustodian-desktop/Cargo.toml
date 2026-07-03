@@ -12,23 +12,27 @@ name = "rustodian-desktop"
 path = "src/main.rs"
 
 [dependencies]
-rustodian-types.workspace = true
-rustodian-core.workspace = true
-rustodian-storage.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-uuid.workspace = true
-chrono.workspace = true
-eframe = "0.35.0"
-ahash = "0.8.12"
+rustodian-types = { workspace = true }
+rustodian-core = { workspace = true }
+rustodian-storage = { workspace = true }
+rustodian-scanner = { workspace = true }
+rustodian-git = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
 dirs = "6.0.0"
 rfd = "0.17.2"
-rustodian-scanner.workspace = true
-rustodian-git.workspace = true
+
+# High-octane UI integration replace eframe
+slint = "1.9"
+
+[build-dependencies]
+slint-build = "1.9"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-insta.workspace = true
+insta = { workspace = true }
