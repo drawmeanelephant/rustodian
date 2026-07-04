@@ -28,6 +28,19 @@ pub enum GuiMessage {
         path: PathBuf,
     },
 
+    Shutdown,
+    TriggerIngest {
+        path: PathBuf,
+    },
+    TriggerAgentExport {
+        path: PathBuf,
+    },
+    ToggleTask {
+        task_id: Option<String>,
+        target_content: Option<String>,
+        path: PathBuf,
+    },
+
     KillCommand,
     /// Discover documentation files in a project root.
     DiscoverDocs {
