@@ -84,14 +84,13 @@ pub fn run_worker(
                 use_shell,
             } => {
                 // Kill any existing process first
-                if let Some(proc_arc) = state.running_process.take() {
-                    if !state
+                if let Some(proc_arc) = state.running_process.take()
+                    && !state
                         .process_exited
                         .load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        let mut proc = proc_arc.lock().unwrap();
-                        let _ = proc.kill();
-                    }
+                {
+                    let mut proc = proc_arc.lock().unwrap();
+                    let _ = proc.kill();
                 }
                 *state.is_running.lock().unwrap() = true;
                 *state.should_kill.lock().unwrap() = false;
