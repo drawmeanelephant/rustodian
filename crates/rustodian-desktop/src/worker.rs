@@ -83,6 +83,7 @@ pub fn run_worker(
                 use_shell,
             } => {
                 // Kill any existing process first
+                #[allow(clippy::collapsible_if)]
                 if let Some(proc_arc) = state.running_process.take() {
                     if !state
                         .process_exited
@@ -224,6 +225,8 @@ pub fn run_worker(
                     }
                 }
             }
+            GuiMessage::Shutdown => break,
+            GuiMessage::Ingest(_) | GuiMessage::AgentExport(_) | GuiMessage::ToggleTask(_, _) => {}
             GuiMessage::KillCommand => {
                 if let Some(proc_arc) = state.running_process.take() {
                     *state.should_kill.lock().unwrap() = true;

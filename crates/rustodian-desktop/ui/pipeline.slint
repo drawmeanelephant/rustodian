@@ -1,3 +1,13 @@
+
+export enum BlockType { Header, CodeFence, HorizontalRule, Task, BulletList, NumberedList, Text, BlankLine }
+export struct SlintMarkdownBlock {
+    block_type: BlockType,
+    text: string,
+    is_checked: bool,
+    level: int,
+    number: string,
+}
+
 import { Button, VerticalBox, LineEdit, ScrollView, StandardListView } from "std-widgets.slint";
 
 enum PipelinePage { Ingest, Execution, Details, Tasks }
@@ -38,6 +48,9 @@ export component PipelineWindow inherits Window {
     in-out property <string> target-project;
     in property <string> stream-logs;
     in property <bool> working: false;
+
+    in property <[SlintMarkdownBlock]> doc-blocks;
+    callback toggle-task(int, bool);
 
     callback trigger-ingest(string);
     callback trigger-agent-export(string);
@@ -87,7 +100,6 @@ export component PipelineWindow inherits Window {
 
         // Right Viewport Panel
         Rectangle {
-            padding: 24px;
 
             // PANEL A: INGEST
             if root.active-page == PipelinePage.Ingest : VerticalBox {
@@ -137,7 +149,6 @@ export component PipelineWindow inherits Window {
                     Rectangle {
                         background: #0b0b0f;
                         border-radius: 6px;
-                        padding: 12px;
                         Text {
                             text: root.stream-logs;
                             font-family: "monospace";

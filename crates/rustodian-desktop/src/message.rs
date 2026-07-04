@@ -29,6 +29,10 @@ pub enum GuiMessage {
     },
 
     KillCommand,
+    Shutdown,
+    Ingest(String),
+    AgentExport(String),
+    ToggleTask(i32, bool),
     /// Discover documentation files in a project root.
     DiscoverDocs {
         #[allow(dead_code)]
@@ -125,6 +129,7 @@ pub enum WorkerMessage {
 
     /// Result when content has not changed.
     DocUnchanged,
+    StreamLogChunk(String),
 
     /// Result of running the digital janitor.
     CruftPurged(Result<rustodian_core::janitor::JanitorReport, String>),
