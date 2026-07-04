@@ -1,21 +1,19 @@
 //! Background worker thread for Rustodian Desktop.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
-use chrono::Utc;
+use tracing::{error, info};
 
 use rustodian_core::log_buffer::LogBuffer;
-use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
-use rustodian_core::traits::{CommandRunner, ProjectStore, RunningProcess};
-use rustodian_storage::{ProjectLog, SqliteStore};
+use rustodian_core::traits::RunningProcess;
+use rustodian_storage::SqliteStore;
 
 use crate::message::{GuiMessage, WorkerMessage};
 
 /// Candidate filenames for documentation.
+#[allow(dead_code)]
 const DOC_CANDIDATES: &[&str] = &[
     "TODO.md",
     "todo.md",
@@ -28,6 +26,7 @@ const DOC_CANDIDATES: &[&str] = &[
     "task.md",
 ];
 
+#[allow(dead_code)]
 fn discover_docs(project_path: &Path) -> Vec<(String, PathBuf)> {
     let mut found = Vec::new();
     let mut seen_lower = std::collections::HashSet::new();
@@ -45,6 +44,7 @@ fn discover_docs(project_path: &Path) -> Vec<(String, PathBuf)> {
     found
 }
 
+#[allow(dead_code)]
 struct WorkerState {
     store: Arc<SqliteStore>,
     running_process: Option<Arc<Mutex<Box<dyn RunningProcess>>>>,
@@ -53,287 +53,139 @@ struct WorkerState {
     process_exited: Arc<std::sync::atomic::AtomicBool>,
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn run_worker(
-    store: Arc<SqliteStore>,
-    rx: &std::sync::mpsc::Receiver<GuiMessage>,
-    tx: &std::sync::mpsc::Sender<WorkerMessage>,
-    repaint_fn: &std::sync::Arc<dyn Fn() + Send + Sync>,
-) {
-    let mut state = WorkerState {
-        store,
-        running_process: None,
-        is_running: Arc::new(Mutex::new(false)),
-        should_kill: Arc::new(Mutex::new(false)),
-        process_exited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    };
+    rx: std::sync::mpsc::Receiver<crate::message::GuiMessage>,
+    tx: std::sync::mpsc::Sender<crate::message::WorkerMessage>,
+    custodian: std::sync::Arc<rustodian_core::Custodian>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut current_doc_path: Option<PathBuf> = None;
 
     while let Ok(msg) = rx.recv() {
         match msg {
-            GuiMessage::LoadProjects => {
-                let res = state.store.list_projects().map_err(|e| e.to_string());
-                let _ = tx.send(WorkerMessage::ProjectsLoaded(res));
-                repaint_fn();
+            GuiMessage::Shutdown => {
+                info!("Worker thread received shutdown signal, breaking loop.");
+                break;
             }
-            GuiMessage::RunCommand {
-                project_id,
-                project_path,
-                command_name,
-                command_str,
-                use_shell,
+            GuiMessage::TriggerIngest {
+                repo_slug,
+                target_project,
             } => {
-                // Kill any existing process first
-                if let Some(proc_arc) = state.running_process.take() {
-                    if !state
-                        .process_exited
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        let mut proc = proc_arc.lock().unwrap();
-                        let _ = proc.kill();
-                    }
-                }
-                *state.is_running.lock().unwrap() = true;
-                *state.should_kill.lock().unwrap() = false;
-                state
-                    .process_exited
-                    .store(false, std::sync::atomic::Ordering::SeqCst);
-
                 let log_buffer = LogBuffer::new();
-                let log_buffer_clone = log_buffer.clone();
+                log_buffer.push_line(format!(
+                    "Starting ingest operation for repo: {}, target: {}",
+                    repo_slug, target_project
+                ));
 
                 let _ = tx.send(WorkerMessage::CommandStatus {
-                    command_name: command_name.clone(),
-                    is_running: true,
-                    exit_status: None,
-                    log_buffer: log_buffer.clone(),
+                    status: "Running".to_string(),
+                    log: Some(log_buffer.snapshot()),
                 });
-                repaint_fn();
 
-                let spec = CommandSpec {
-                    program: command_str.clone(),
-                    args: vec![],
-                    working_dir: project_path,
-                    env: HashMap::new(),
-                    use_shell,
-                    capture_output: true,
-                };
+                let path = PathBuf::from(&target_project);
+                let config = rustodian_types::ScanConfig::default();
+                let res = custodian.scan(&path, &config).map_err(anyhow::Error::from);
 
-                let runner = DefaultCommandRunner;
-                match runner.spawn(spec) {
-                    Ok(mut child) => {
-                        let stdout = child.stdout();
-                        let stderr = child.stderr();
+                log_buffer.push_line("Ingest operation completed.".to_string());
 
-                        let process_arc = Arc::new(Mutex::new(child));
-                        state.running_process = Some(process_arc.clone());
-
-                        let stdout_log = log_buffer.clone();
-                        let mut stdout_handle = None;
-
-                        if let Some(so) = stdout {
-                            stdout_handle = Some(thread::spawn(move || {
-                                use std::io::{BufRead, BufReader};
-                                let reader = BufReader::new(so);
-                                for line in reader.lines().map_while(Result::ok) {
-                                    stdout_log.push_line(line);
-                                }
-                            }));
-                        }
-
-                        let stderr_log = log_buffer.clone();
-                        let mut stderr_handle = None;
-
-                        if let Some(se) = stderr {
-                            stderr_handle = Some(thread::spawn(move || {
-                                use std::io::{BufRead, BufReader};
-                                let reader = BufReader::new(se);
-                                for line in reader.lines().map_while(Result::ok) {
-                                    stderr_log.push_line(line);
-                                }
-                            }));
-                        }
-
-                        // We need to spawn another thread to wait for the process to finish,
-                        // so we don't block the worker loop which needs to process KillCommand
-                        let is_running_clone = state.is_running.clone();
-                        let tx_clone = tx.clone();
-                        let store_clone = state.store.clone();
-                        let cmd_name = command_name.clone();
-                        let repaint_fn_clone = repaint_fn.clone();
-                        let should_kill_clone = state.should_kill.clone();
-                        let process_exited_clone = state.process_exited.clone();
-
-                        // Wait thread
-                        thread::spawn(move || {
-                            // Wait for streams to finish reading
-                            if let Some(h) = stdout_handle {
-                                let _ = h.join();
-                            }
-                            if let Some(h) = stderr_handle {
-                                let _ = h.join();
-                            }
-
-                            process_exited_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                            let mut proc = process_arc.lock().unwrap();
-                            let exit_status = proc.wait().ok().flatten();
-
-                            let mut exit_code = exit_status;
-                            let killed = *should_kill_clone.lock().unwrap();
-
-                            if killed {
-                                exit_code = Some(-1);
-                            }
-
-                            let full_log = log_buffer_clone.snapshot();
-
-                            // Save to database
-                            let log_record = ProjectLog {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                project_id: project_id.to_string(),
-                                command_name: cmd_name.clone(),
-                                exit_code,
-                                log_text: full_log,
-                                run_at: Utc::now(),
-                            };
-                            let _ = store_clone.save_log(&log_record);
-
-                            let _ = tx_clone.send(WorkerMessage::CommandStatus {
-                                command_name: cmd_name,
-                                is_running: false,
-                                exit_status: Some(if killed {
-                                    "killed".to_string()
-                                } else {
-                                    "finished".to_string()
-                                }),
-                                log_buffer: log_buffer_clone,
-                            });
-                            *is_running_clone.lock().unwrap() = false;
-                            repaint_fn_clone();
-                        });
-                    }
-                    Err(e) => {
-                        log_buffer.push_line(format!("Failed to spawn process: {e}"));
-                        let _ = tx.send(WorkerMessage::CommandStatus {
-                            command_name,
-                            is_running: false,
-                            exit_status: Some("spawn error".to_string()),
-                            log_buffer,
-                        });
-                        *state.is_running.lock().unwrap() = false;
-                        repaint_fn();
-                    }
-                }
-            }
-            GuiMessage::KillCommand => {
-                if let Some(proc_arc) = state.running_process.take() {
-                    *state.should_kill.lock().unwrap() = true;
-                    if !state
-                        .process_exited
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        let mut proc = proc_arc.lock().unwrap();
-                        let _ = proc.kill();
-                    }
-                }
-            }
-            GuiMessage::DiscoverDocs { project_path } => {
-                let available_docs = discover_docs(&project_path);
-                let _ = tx.send(WorkerMessage::DocsDiscovered {
-                    project_path,
-                    available_docs,
+                let _ = tx.send(WorkerMessage::CommandStatus {
+                    status: "Finished".to_string(),
+                    log: Some(log_buffer.snapshot()),
                 });
-                repaint_fn();
-            }
-            GuiMessage::CheckDocFreshness { path, known_mtime } => {
-                let current_mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
-                if known_mtime == current_mtime {
-                    let _ = tx.send(WorkerMessage::DocFresh { path });
-                } else {
-                    let _ = tx.send(WorkerMessage::DocStale { path });
-                }
-                repaint_fn();
-            }
-            GuiMessage::ScanProjects { path } => {
-                let scanner = rustodian_scanner::FsScanner;
-                let git = rustodian_git::Git2Inspector;
-                let runner = rustodian_core::runner::DefaultCommandRunner;
-                let custodian = rustodian_core::Custodian::new(
-                    Box::new((*state.store).clone()),
-                    Box::new(scanner),
-                    Box::new(git),
-                    Box::new(runner),
-                );
-                let res = custodian
-                    .scan(&path, &rustodian_types::ScanConfig::default())
-                    .map_err(anyhow::Error::from);
-                let _ = tx.send(WorkerMessage::ScanComplete(res));
-                let list_res = state.store.list_projects().map_err(|e| e.to_string());
-                let _ = tx.send(WorkerMessage::ProjectsLoaded(list_res));
-                repaint_fn();
-            }
 
-            GuiMessage::PurgeCruft {
-                project_id,
-                project_path: _,
-                dry_run,
-            } => {
-                let scanner = rustodian_scanner::FsScanner;
-                let git = rustodian_git::Git2Inspector;
-                let runner = rustodian_core::runner::DefaultCommandRunner;
-                let custodian = rustodian_core::Custodian::new(
-                    Box::new((*state.store).clone()),
-                    Box::new(scanner),
-                    Box::new(git),
-                    Box::new(runner),
-                );
-
-                let res = match state.store.get_project(&project_id) {
-                    Ok(Some(project)) => {
-                        let janitor = rustodian_core::janitor::DigitalJanitor::new(&custodian);
-                        janitor.clean(&project, dry_run).map_err(|e| e.to_string())
-                    }
-                    Ok(None) => Err("Project not found".to_string()),
-                    Err(e) => Err(e.to_string()),
+                let (success, message) = match res {
+                    Ok(report) => (true, format!("Scan complete: {:?}", report)),
+                    Err(e) => (false, format!("Scan failed: {}", e)),
                 };
+                let _ = tx.send(WorkerMessage::ScanComplete { success, message });
+            }
+            GuiMessage::TriggerAgentExport { target_project } => {
+                let log_buffer = LogBuffer::new();
+                log_buffer.push_line(format!(
+                    "Starting export operation for target: {}",
+                    target_project
+                ));
 
-                let _ = tx.send(WorkerMessage::CruftPurged(res));
-                repaint_fn();
-            }
-            GuiMessage::GetDirtyFiles { project_path } => {
-                let git = rustodian_git::Git2Inspector;
-                let res =
-                    rustodian_core::traits::GitInspector::get_dirty_files(&git, &project_path)
-                        .map_err(|e| e.to_string());
-                let _ = tx.send(WorkerMessage::DirtyFilesResult(res));
-                repaint_fn();
-            }
-            GuiMessage::SaveSetting { key, value } => {
-                let _ = state.store.set_setting(&key, &value);
-            }
+                let _ = tx.send(WorkerMessage::CommandStatus {
+                    status: "Running".to_string(),
+                    log: Some(log_buffer.snapshot()),
+                });
 
-            GuiMessage::LoadDocContent { path, known_hash } => {
-                let content = fs::read_to_string(&path)
+                let path = PathBuf::from(&target_project);
+                let config = rustodian_types::ScanConfig::default();
+                let res = custodian.scan(&path, &config).map_err(anyhow::Error::from);
+
+                log_buffer.push_line("Export operation completed.".to_string());
+
+                let _ = tx.send(WorkerMessage::CommandStatus {
+                    status: "Finished".to_string(),
+                    log: Some(log_buffer.snapshot()),
+                });
+
+                let (success, message) = match res {
+                    Ok(report) => (true, format!("Scan complete: {:?}", report)),
+                    Err(e) => (false, format!("Scan failed: {}", e)),
+                };
+                let _ = tx.send(WorkerMessage::ScanComplete { success, message });
+            }
+            GuiMessage::LoadDocContent { path } => {
+                let path_buf = PathBuf::from(&path);
+                current_doc_path = Some(path_buf.clone());
+                let content = fs::read_to_string(&path_buf)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
 
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                std::hash::Hash::hash(&content, &mut hasher);
-                let content_hash = std::hash::Hasher::finish(&hasher);
+                let blocks = crate::markdown::parse_markdown(&content);
 
-                if Some(content_hash) == known_hash {
-                    let _ = tx.send(WorkerMessage::DocUnchanged);
-                } else {
-                    let last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
-                    let parsed = crate::markdown::parse_markdown(&content);
+                let _ = tx.send(WorkerMessage::DocLoaded { path, blocks });
+            }
+            GuiMessage::ToggleTask { task_id, completed } => {
+                let path = match &current_doc_path {
+                    Some(p) => p.clone(),
+                    None => {
+                        error!("ToggleTask received but no document is currently loaded.");
+                        continue;
+                    }
+                };
 
-                    let _ = tx.send(WorkerMessage::DocLoaded {
-                        content,
-                        parsed,
-                        last_modified,
-                        content_hash,
-                    });
+                let content = match fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("Failed to read file {:?} for ToggleTask: {}", path, e);
+                        continue;
+                    }
+                };
+
+                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                let mut modified = false;
+
+                for line in &mut lines {
+                    if line.contains(&task_id) {
+                        if completed && line.contains("- [ ]") {
+                            *line = line.replace("- [ ]", "- [x]");
+                            modified = true;
+                            info!("Toggled task to checked in {:?}", path);
+                            break;
+                        } else if !completed && (line.contains("- [x]") || line.contains("- [X]")) {
+                            *line = line.replace("- [x]", "- [ ]").replace("- [X]", "- [ ]");
+                            modified = true;
+                            info!("Toggled task to unchecked in {:?}", path);
+                            break;
+                        }
+                    }
                 }
-                repaint_fn();
+
+                if modified {
+                    let new_content = lines.join("\n") + "\n";
+                    if let Err(e) = fs::write(&path, new_content) {
+                        error!(
+                            "Failed to write modified file {:?} for ToggleTask: {}",
+                            path, e
+                        );
+                    }
+                } else {
+                    info!("No matching task found to toggle in {:?}", path);
+                }
             }
         }
     }
+    Ok(())
 }

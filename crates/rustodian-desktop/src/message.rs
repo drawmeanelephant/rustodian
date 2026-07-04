@@ -3,7 +3,10 @@
 /// Messages sent from the GUI thread to the Background Worker thread.
 pub enum GuiMessage {
     /// Trigger an ingest operation.
-    TriggerIngest { repo_slug: String, target_project: String },
+    TriggerIngest {
+        repo_slug: String,
+        target_project: String,
+    },
     /// Trigger an agent export.
     TriggerAgentExport { target_project: String },
     /// Request a markdown file payload.
@@ -36,5 +39,8 @@ pub enum WorkerMessage {
     /// Notifies UI of projects available in the store.
     ProjectsLoaded(Vec<String>),
     /// Returns structural parsed markdown blocks.
-    DocLoaded { path: String, blocks: Vec<MarkdownBlock> },
+    DocLoaded {
+        path: String,
+        blocks: Vec<MarkdownBlock>,
+    },
 }

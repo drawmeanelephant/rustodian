@@ -1,3 +1,7 @@
+pub mod markdown;
+pub mod message;
+pub mod worker;
+
 pub mod ui_mapping {
     use rustodian_types::{Project, ProjectCommand};
     use slint::{ModelRc, SharedString, VecModel};
@@ -95,7 +99,7 @@ pub mod ui_mapping {
             assert_eq!(slint_cmd.description.as_str(), "Test description");
             assert_eq!(slint_cmd.command.as_str(), "cargo test");
             assert_eq!(slint_cmd.source.as_str(), "Cargo.toml");
-            assert_eq!(slint_cmd.use_shell, false);
+            assert!(!slint_cmd.use_shell);
         }
 
         #[test]
@@ -110,7 +114,7 @@ pub mod ui_mapping {
 
             let slint_cmd = map_project_command(&cmd);
             assert_eq!(slint_cmd.description.as_str(), "");
-            assert_eq!(slint_cmd.use_shell, true);
+            assert!(slint_cmd.use_shell);
         }
 
         #[test]
