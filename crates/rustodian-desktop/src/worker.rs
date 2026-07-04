@@ -68,6 +68,7 @@ pub fn run_worker(
         process_exited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
+    let mut current_doc_path: Option<PathBuf> = None;
     while let Ok(msg) = rx.recv() {
         match msg {
             GuiMessage::LoadProjects => {
@@ -312,6 +313,7 @@ pub fn run_worker(
             }
 
             GuiMessage::LoadDocContent { path, known_hash } => {
+                current_doc_path = Some(path.clone());
                 let content = fs::read_to_string(&path)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
 
@@ -333,6 +335,44 @@ pub fn run_worker(
                     });
                 }
                 repaint_fn();
+            }
+
+            GuiMessage::ToggleTask { task_id, completed } => {
+                let path = match &current_doc_path {
+                    Some(p) => p.clone(),
+                    None => {
+                        continue;
+                    }
+                };
+
+                let content = match fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        continue;
+                    }
+                };
+
+                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                let mut modified = false;
+
+                for line in &mut lines {
+                    if line.contains(&task_id) {
+                        if completed && line.contains("- [ ]") {
+                            *line = line.replace("- [ ]", "- [x]");
+                            modified = true;
+                            break;
+                        } else if !completed && (line.contains("- [x]") || line.contains("- [X]")) {
+                            *line = line.replace("- [x]", "- [ ]").replace("- [X]", "- [ ]");
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+
+                if modified {
+                    let new_content = lines.join("\n") + "\n";
+                    let _ = fs::write(&path, new_content);
+                }
             }
         }
     }
