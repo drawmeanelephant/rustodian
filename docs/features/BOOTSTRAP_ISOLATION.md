@@ -1,37 +1,32 @@
 # Environment Isolation in Rustodian
 
 ## Why Isolation Matters
-When Rustodian bootstraps and verifies projects, it strictly isolates operations to prevent polluting the host system. This ensures a clean, reproducible environment across heterogeneous codebases and avoids version conflicts.
-
-## Isolation Strategies
-
-**Rust**
-Cargo natively isolates builds in the `target/` directory. Rustodian runs standard `cargo build` and `cargo test`.
-
-**Node.js**
-Dependencies are isolated in the local `node_modules` directory. Rustodian dynamically detects lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`) to use the correct package manager (`yarn`, `pnpm`, `bun`, or `npm` fallback).
-
-**Go**
-To prevent global module cache pollution, Rustodian overrides the global `GOPATH` with a project-local `.gopath` directory before running `go mod download` and `go test ./...`.
-
-**Python**
-Rustodian creates a strict Virtual Environment (`.venv`) to isolate packages.
-1. It attempts environment creation using `python3 -m venv .venv`, falling back to `python -m venv .venv`.
-2. Paths are dynamically resolved based on the OS: `.venv\Scripts\` on Windows, and `.venv/bin/` on Unix.
-3. Dependencies are installed using the `.venv`'s `pip` (`pip install -r requirements.txt` or `pip install .`).
-4. Verification runs via `.venv`'s `pytest` or falls back to `python -m unittest discover`.
+When Rustodian bootstraps and verifies projects, it isolates operations to prevent polluting the host system. This ensures clean, reproducible environments across codebases and avoids version conflicts.
 
 ## Language Command Mapping
 
 | Language | Isolation Mechanism | Setup Command | Verify Command |
 | --- | --- | --- | --- |
 | Rust | Cargo (`target/`) | `cargo build` | `cargo test` |
-| Node | `node_modules` | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
-| Go | Local `GOPATH` (`.gopath/`) | `go mod download` | `go test ./...` |
-| Python | Virtual Env (`.venv/`) | `.venv/[bin\|Scripts]/pip install [-r requirements.txt\|.]` | `.venv/[bin\|Scripts]/[pytest -v\|python -m unittest discover]` |
+| Node | Local `node_modules` | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
+| Go | Local `GOPATH` override to `.gopath` | `go mod download` | `go test ./...` |
+| Python | Virtual Env (`.venv`) | Unix: `.venv/bin/pip install [-r requirements.txt\|.]`<br>Win: `.venv\Scripts\pip install [-r requirements.txt\|.]` | Unix: `.venv/bin/pytest -v` (fallback: `.venv/bin/python -m unittest discover`)<br>Win: `.venv\Scripts\pytest -v` (fallback: `.venv\Scripts\python -m unittest discover`) |
+
+## Isolation Strategies
+
+**Rust:** Cargo isolates builds natively in the `target/` directory.
+
+**Node.js:** Dependencies are isolated in the local `node_modules` directory. Rustodian detects lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`) to use the correct package manager (with `npm` as fallback).
+
+**Go:** To prevent global module cache pollution, Rustodian overrides the global `GOPATH` environment variable with a project-local `.gopath` directory before running.
+
+**Python:** Rustodian strictly uses a Virtual Environment (`.venv`) to isolate packages:
+1. Attempts creation with `python3 -m venv .venv`, falling back to `python -m venv .venv`.
+2. Dependencies are installed using the local `pip` (`install -r requirements.txt` or `install .`), with paths resolving dynamically by OS (Unix: `.venv/bin/pip`, Windows: `.venv\Scripts\pip`).
+3. Verification runs via the local `pytest -v`, falling back to `python -m unittest discover` using OS-specific executable paths.
 
 ## Example: Mixed-Language Monorepo
-Consider a monorepo containing a frontend app and a backend API:
+Consider a monorepo containing a frontend and backend:
 ```text
 my-monorepo/
 ├── frontend/ (Node)
@@ -43,6 +38,6 @@ my-monorepo/
 ```
 When Rustodian scans this directory:
 1. **Frontend:** It detects `pnpm-lock.yaml`, isolating dependencies in `frontend/node_modules/` via `pnpm install`, and verifies with `pnpm test`.
-2. **Backend:** It creates `backend/.venv`, uses OS-specific paths (e.g., `backend/.venv/bin/pip install -r requirements.txt`) to install dependencies, and verifies using `backend/.venv/bin/pytest -v` (falling back to `unittest` if `pytest` is absent).
+2. **Backend:** It creates `backend/.venv`. On Unix, it installs dependencies using `backend/.venv/bin/pip install -r requirements.txt` and verifies with `backend/.venv/bin/pytest -v` (or `unittest` if `pytest` is absent). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
 
 Neither project affects the host system's global state or each other.
