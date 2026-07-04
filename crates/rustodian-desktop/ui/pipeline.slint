@@ -1,23 +1,32 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, ScrollView, StandardListView } from "std-widgets.slint";
 
-export enum BlockType { Header, CodeFence, HorizontalRule, Task, BulletList, NumberedList, Text, BlankLine }
-export struct SlintMarkdownBlock {
-    block_type: BlockType,
-    text: string,
-    is_checked: bool,
-    level: int,
-    number: string,
+export struct SlintProjectCommand {
+    name: string,
+    cmd: string,
+    args: string,
 }
 
-import { Button, VerticalBox, LineEdit, ScrollView, StandardListView } from "std-widgets.slint";
+export struct SlintProject {
+    name: string,
+    path: string,
+    discovery_date: string,
+    commands: [SlintProjectCommand],
+}
 
-enum PipelinePage { Ingest, Execution, Details, Tasks }
+export struct SlintMarkdownBlock {
+    block_type: string,
+    content: string,
+    level: int,
+    is_checked: bool,
+    task_id: string,
+}
 
 component SidebarButton inherits Rectangle {
     in property <string> text;
     in property <bool> active;
     callback clicked;
 
-    background: active ? #2a2a3a : transparent;
+    background: active ? #334155 : transparent;
     border-radius: 8px;
     height: 44px;
 
@@ -27,7 +36,7 @@ component SidebarButton inherits Rectangle {
 
     Text {
         text: root.text;
-        color: root.active ? #ffffff : #a0a0b0;
+        color: root.active ? #ffffff : #94a3b8;
         x: 16px;
         font-weight: root.active ? 700 : 400;
         vertical-alignment: center;
@@ -35,188 +44,273 @@ component SidebarButton inherits Rectangle {
 }
 
 export component PipelineWindow inherits Window {
-    title: "Rustodian Jules Context Engine";
-    preferred-width: 800px;
-    preferred-height: 520px;
-    background: #121218;
+    title: "Rustodian Pipeline";
+    preferred-width: 900px;
+    preferred-height: 600px;
+    background: #0f172a;
 
-    // View states for the printer panel style layout
-    in-out property <PipelinePage> active-page: PipelinePage.Ingest;
+    in-out property <int> active-page: 0;
 
-    // Core data hooks
     in-out property <string> repo-slug;
     in-out property <string> target-project;
     in property <string> stream-logs;
-    in property <bool> working: false;
-
+    in property <bool> working;
+    in property <[SlintProject]> projects;
+    in-out property <int> selected-project-index: -1;
     in property <[SlintMarkdownBlock]> doc-blocks;
-    callback toggle-task(int, bool);
 
-    callback trigger-ingest(string);
-    callback trigger-agent-export(string);
+    callback trigger-ingest();
+    callback trigger-agent-export();
+    callback run-command(string, string);
+    callback load-document(string);
+    callback toggle-task(string, bool);
 
     HorizontalLayout {
-        // Left Sidebar — Quick View Control
+        // Sidebar
         Rectangle {
             width: 200px;
-            background: #1a1a24;
-
+            background: #1e293b;
             VerticalLayout {
                 padding: 16px;
                 spacing: 8px;
                 alignment: start;
 
                 Text {
-                    text: "🏛️ PIPELINE";
+                    text: "RUSTODIAN";
                     font-size: 16px;
                     font-weight: 900;
                     color: #ffffff;
                 }
+                Rectangle { height: 16px; }
 
-                Rectangle { height: 20px; } // Spacer
-
                 SidebarButton {
-                    text: "📥 Ingest Package";
-                    active: root.active-page == PipelinePage.Ingest;
-                    clicked => { root.active-page = PipelinePage.Ingest; }
+                    text: "0: Ingest";
+                    active: root.active-page == 0;
+                    clicked => { root.active-page = 0; }
                 }
                 SidebarButton {
-                    text: "⚙️ Run & Export";
-                    active: root.active-page == PipelinePage.Execution;
-                    clicked => { root.active-page = PipelinePage.Execution; }
+                    text: "1: Export";
+                    active: root.active-page == 1;
+                    clicked => { root.active-page = 1; }
                 }
                 SidebarButton {
-                    text: "🔍 Details";
-                    active: root.active-page == PipelinePage.Details;
-                    clicked => { root.active-page = PipelinePage.Details; }
+                    text: "2: Explorer";
+                    active: root.active-page == 2;
+                    clicked => { root.active-page = 2; }
                 }
                 SidebarButton {
-                    text: "📋 Tasks";
-                    active: root.active-page == PipelinePage.Tasks;
-                    clicked => { root.active-page = PipelinePage.Tasks; }
+                    text: "3: Logs";
+                    active: root.active-page == 3;
+                    clicked => { root.active-page = 3; }
+                }
+                SidebarButton {
+                    text: "4: Docs";
+                    active: root.active-page == 4;
+                    clicked => { root.active-page = 4; }
                 }
             }
         }
 
-        // Right Viewport Panel
+        // Main content area
         Rectangle {
+            VerticalLayout {
+                padding: 24px;
 
-            // PANEL A: INGEST
-            if root.active-page == PipelinePage.Ingest : VerticalBox {
-                spacing: 16px;
-                alignment: start;
-
-                Text { text: "Grab Package Asset"; font-size: 20px; font-weight: 700; color: #fff; }
-
-                LineEdit {
-                    placeholder-text: "username/repository-slug";
-                    text <=> root.repo-slug;
-                    height: 40px;
-                }
-
-                Button {
-                    text: root.working ? "Pulling Repo Down..." : "Fetch & Sync Remote Workspace";
-                    enabled: !root.working;
-                    height: 44px;
-                    clicked => { root.trigger-ingest(root.repo-slug); }
-                }
-            }
-
-            // PANEL B: EXECUTION & SNAPSHOT EXPORT
-            if root.active-page == PipelinePage.Execution : VerticalBox {
-                spacing: 16px;
-
-                HorizontalLayout {
-                    alignment: space-between;
-                    Text { text: "Execute & Export Context"; font-size: 20px; font-weight: 700; color: #fff; }
-                }
-
-                LineEdit {
-                    placeholder-text: "Active workspace filter query";
-                    text <=> root.target-project;
-                }
-
-                Button {
-                    text: "⚡ Run Environment & Generate RAG Markdown";
-                    primary: true;
-                    height: 48px;
-                    clicked => { root.trigger-agent-export(root.target-project); }
-                }
-
-                Text { text: "Live Output Log Stream:"; color: #a0a0b0; }
-
-                ScrollView {
-                    Rectangle {
-                        background: #0b0b0f;
-                        border-radius: 6px;
-                        Text {
-                            text: root.stream-logs;
-                            font-family: "monospace";
-                            color: #a3be8c;
-                            wrap: word-wrap;
-                        }
-                    }
-                }
-            }
-
-            // PANEL C: DETAILS
-            if root.active-page == PipelinePage.Details : HorizontalLayout {
-                spacing: 16px;
-
-                StandardListView {
-                    width: 200px;
-                    model: [{ text: "Project A" }, { text: "Project B" }, { text: "Project C" }];
-                }
-
-                Rectangle {
-                    background: #1a1a24;
-                    border-radius: 8px;
-
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 8px;
-                        Text { text: "Project Metadata Placeholder"; font-size: 18px; font-weight: 700; color: #fff; }
-                        Text { text: "Select a project to view its details, context, and configurations here."; color: #a0a0b0; wrap: word-wrap; }
-                    }
-                }
-            }
-
-            // PANEL D: TASKS
-            if root.active-page == PipelinePage.Tasks : VerticalBox {
-                spacing: 16px;
-
-                Text { text: "Available Tasks"; font-size: 20px; font-weight: 700; color: #fff; }
-
-                HorizontalLayout {
+                // Page 0
+                if root.active-page == 0 : VerticalBox {
+                    alignment: start;
                     spacing: 16px;
+                    Text { text: "Repository Ingest"; font-size: 24px; color: #fff; font-weight: 700; }
+                    Text { text: "Repo Slug"; color: #cbd5e1; }
+                    LineEdit { text <=> root.repo-slug; }
+                    Text { text: "Target Project"; color: #cbd5e1; }
+                    LineEdit { text <=> root.target-project; }
+                    Button {
+                        text: root.working ? "Working..." : "Ingest Repository";
+                        enabled: !root.working;
+                        clicked => { root.trigger-ingest(); }
+                    }
+                }
+
+                // Page 1
+                if root.active-page == 1 : VerticalBox {
+                    alignment: start;
+                    spacing: 16px;
+                    Text { text: "Agent Export"; font-size: 24px; color: #fff; font-weight: 700; }
+                    Text { text: "Target Project"; color: #cbd5e1; }
+                    LineEdit { text <=> root.target-project; }
+                    Button {
+                        text: "Export";
+                        clicked => { root.trigger-agent-export(); }
+                    }
+                }
+
+                // Page 2
+                if root.active-page == 2 : HorizontalLayout {
+                    spacing: 16px;
+
+                    // Left pane: Project list
                     Rectangle {
-                        background: #2a2a3a;
-                        border-radius: 6px;
-                        VerticalLayout {
-                            padding: 12px;
-                            spacing: 4px;
-                            Text { text: "Task: Build"; font-weight: 700; color: #fff; }
-                            Text { text: "cargo build"; color: #a3be8c; font-family: "monospace"; }
+                        width: 250px;
+                        background: #1e293b;
+                        border-radius: 8px;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 4px;
+                                for project[idx] in root.projects: Rectangle {
+                                    height: 40px;
+                                    background: root.selected-project-index == idx ? #334155 : transparent;
+                                    border-radius: 4px;
+                                    TouchArea {
+                                        clicked => { root.selected-project-index = idx; }
+                                    }
+                                    Text {
+                                        text: project.name;
+                                        color: #fff;
+                                        x: 12px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
                     }
+
+                    // Right pane: Project details
                     Rectangle {
-                        background: #2a2a3a;
-                        border-radius: 6px;
-                        VerticalLayout {
-                            padding: 12px;
-                            spacing: 4px;
-                            Text { text: "Task: Test"; font-weight: 700; color: #fff; }
-                            Text { text: "cargo test"; color: #a3be8c; font-family: "monospace"; }
+                        background: #1e293b;
+                        border-radius: 8px;
+
+                        if root.selected-project-index >= 0 && root.selected-project-index < root.projects.length : VerticalLayout {
+                            padding: 16px;
+                            spacing: 12px;
+                            Text {
+                                text: root.projects[root.selected-project-index].name;
+                                font-size: 20px;
+                                font-weight: 700;
+                                color: #fff;
+                            }
+                            Text {
+                                text: "Path: " + root.projects[root.selected-project-index].path;
+                                color: #94a3b8;
+                            }
+                            Text {
+                                text: "Discovered: " + root.projects[root.selected-project-index].discovery_date;
+                                color: #94a3b8;
+                            }
+                            Text {
+                                text: "Commands:";
+                                color: #cbd5e1;
+                                font-weight: 700;
+                            }
+                            ScrollView {
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    for cmd in root.projects[root.selected-project-index].commands: Rectangle {
+                                        background: #334155;
+                                        border-radius: 6px;
+                                        VerticalLayout {
+                                            padding: 12px;
+                                            spacing: 8px;
+                                            Text { text: cmd.name; font-weight: 700; color: #fff; }
+                                            Text { text: "cmd: " + cmd.cmd + " " + cmd.args; color: #94a3b8; font-family: "monospace"; }
+                                            Button {
+                                                text: "Run Trigger";
+                                                clicked => { root.run-command(root.projects[root.selected-project-index].name, cmd.name); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if root.selected-project-index < 0 || root.selected-project-index >= root.projects.length : VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: "Select a project to view details";
+                                color: #94a3b8;
+                                horizontal-alignment: center;
+                            }
                         }
                     }
-                    Rectangle {
-                        background: #2a2a3a;
-                        border-radius: 6px;
+                }
+
+                // Page 3
+                if root.active-page == 3 : VerticalBox {
+                    spacing: 16px;
+                    Text { text: "Live Log Stream"; font-size: 24px; color: #fff; font-weight: 700; }
+                    ScrollView {
+                        Rectangle {
+                            background: #000;
+                            border-radius: 6px;
+                            VerticalLayout {
+                                padding: 12px;
+                                Text {
+                                    text: root.stream-logs;
+                                    font-family: "monospace";
+                                    color: #a3be8c;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Page 4
+                if root.active-page == 4 : VerticalBox {
+                    spacing: 16px;
+                    Text { text: "Documentation Viewer"; font-size: 24px; color: #fff; font-weight: 700; }
+                    Button {
+                        text: "Load Readme";
+                        clicked => { root.load-document("README.md"); }
+                    }
+                    ScrollView {
                         VerticalLayout {
-                            padding: 12px;
-                            spacing: 4px;
-                            Text { text: "Task: Lint"; font-weight: 700; color: #fff; }
-                            Text { text: "cargo clippy"; color: #a3be8c; font-family: "monospace"; }
+                            spacing: 8px;
+                            for block in root.doc-blocks: VerticalLayout {
+                                if block.block_type == "heading" : Text {
+                                    text: block.content;
+                                    font-size: max(12px, 24px - (block.level * 2px));
+                                    font-weight: 700;
+                                    color: #fff;
+                                }
+                                if block.block_type == "paragraph" : Text {
+                                    text: block.content;
+                                    color: #cbd5e1;
+                                    wrap: word-wrap;
+                                }
+                                if block.block_type == "code" : Rectangle {
+                                    background: #000;
+                                    border-radius: 4px;
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        Text {
+                                            text: block.content;
+                                            color: #a3be8c;
+                                            font-family: "monospace";
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                                if block.block_type == "task" : HorizontalLayout {
+                                    spacing: 8px;
+                                    Rectangle {
+                                        width: 16px;
+                                        height: 16px;
+                                        border-color: #94a3b8;
+                                        border-width: 1px;
+                                        border-radius: 2px;
+                                        background: block.is_checked ? #3b82f6 : transparent;
+                                        TouchArea {
+                                            clicked => { root.toggle-task(block.task_id, !block.is_checked); }
+                                        }
+                                    }
+                                    Text {
+                                        text: block.content;
+                                        color: #cbd5e1;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
