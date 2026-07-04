@@ -395,15 +395,10 @@ fn main() -> Result<(), slint::PlatformError> {
                             }
                         }
                         WorkerMessage::DocLoaded {
-                            content: _,
-                            parsed,
-                            ..
+                            content: _, parsed, ..
                         } => {
-                            let slint_blocks: Vec<SlintMarkdownBlock> = parsed
-                                .blocks
-                                .into_iter()
-                                .map(map_markdown_block)
-                                .collect();
+                            let slint_blocks: Vec<SlintMarkdownBlock> =
+                                parsed.blocks.into_iter().map(map_markdown_block).collect();
                             ui.set_doc_blocks(ModelRc::new(VecModel::from(slint_blocks)));
                         }
                         _ => {}

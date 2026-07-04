@@ -21,18 +21,14 @@ pub enum GuiMessage {
     /// Kill the currently running command (if any).
     KillCommand,
     /// Discover documentation files in a project root.
-    DiscoverDocs {
-        project_path: PathBuf,
-    },
+    DiscoverDocs { project_path: PathBuf },
     /// Check if a specific document file is fresh.
     CheckDocFreshness {
         path: PathBuf,
         known_mtime: Option<SystemTime>,
     },
     /// Scan projects.
-    ScanProjects {
-        path: PathBuf,
-    },
+    ScanProjects { path: PathBuf },
     /// Purge cruft files.
     PurgeCruft {
         project_id: ProjectId,
@@ -40,24 +36,16 @@ pub enum GuiMessage {
         dry_run: bool,
     },
     /// Get dirty files list.
-    GetDirtyFiles {
-        project_path: PathBuf,
-    },
+    GetDirtyFiles { project_path: PathBuf },
     /// Save a setting to the database.
-    SaveSetting {
-        key: String,
-        value: String,
-    },
+    SaveSetting { key: String, value: String },
     /// Load the content of a specific document file.
     LoadDocContent {
         path: PathBuf,
         known_hash: Option<u64>,
     },
     /// Update a specific task markdown line checkbox state.
-    ToggleTask {
-        task_id: String,
-        completed: bool,
-    },
+    ToggleTask { task_id: String, completed: bool },
 }
 
 /// A parsed markdown block.

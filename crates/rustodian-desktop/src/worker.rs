@@ -13,7 +13,7 @@ use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
 use rustodian_core::traits::{CommandRunner, ProjectStore, RunningProcess};
 use rustodian_storage::{ProjectLog, SqliteStore};
 
-use crate::message::{GuiMessage, WorkerMessage};
+use crate::message::{GuiMessage, ParsedMarkdown, WorkerMessage};
 
 /// Candidate filenames for documentation.
 const DOC_CANDIDATES: &[&str] = &[
@@ -329,7 +329,7 @@ pub fn run_worker(
 
                     let _ = tx.send(WorkerMessage::DocLoaded {
                         content,
-                        parsed,
+                        parsed: ParsedMarkdown { blocks: parsed },
                         last_modified,
                         content_hash,
                     });
