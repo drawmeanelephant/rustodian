@@ -1,3 +1,7 @@
+pub mod markdown;
+pub mod message;
+pub mod worker;
+
 pub mod ui_mapping {
     use rustodian_types::{Project, ProjectCommand};
     use slint::{ModelRc, SharedString, VecModel};

@@ -1,22 +1,19 @@
 //! Background worker thread for Rustodian Desktop.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
-use chrono::Utc;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use rustodian_core::log_buffer::LogBuffer;
-use rustodian_core::runner::{CommandSpec, DefaultCommandRunner};
-use rustodian_core::traits::{CommandRunner, ProjectStore, RunningProcess};
-use rustodian_storage::{ProjectLog, SqliteStore};
+use rustodian_core::traits::RunningProcess;
+use rustodian_storage::SqliteStore;
 
 use crate::message::{GuiMessage, WorkerMessage};
 
 /// Candidate filenames for documentation.
+#[allow(dead_code)]
 const DOC_CANDIDATES: &[&str] = &[
     "TODO.md",
     "todo.md",
@@ -29,6 +26,7 @@ const DOC_CANDIDATES: &[&str] = &[
     "task.md",
 ];
 
+#[allow(dead_code)]
 fn discover_docs(project_path: &Path) -> Vec<(String, PathBuf)> {
     let mut found = Vec::new();
     let mut seen_lower = std::collections::HashSet::new();
@@ -46,6 +44,7 @@ fn discover_docs(project_path: &Path) -> Vec<(String, PathBuf)> {
     found
 }
 
+#[allow(dead_code)]
 struct WorkerState {
     store: Arc<SqliteStore>,
     running_process: Option<Arc<Mutex<Box<dyn RunningProcess>>>>,
@@ -59,62 +58,94 @@ pub fn run_worker(
     tx: std::sync::mpsc::Sender<crate::message::WorkerMessage>,
     custodian: std::sync::Arc<rustodian_core::Custodian>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut current_doc_path: Option<PathBuf> = None;
+
     while let Ok(msg) = rx.recv() {
         match msg {
             GuiMessage::Shutdown => {
                 info!("Worker thread received shutdown signal, breaking loop.");
                 break;
             }
-            GuiMessage::TriggerIngest { path } | GuiMessage::TriggerAgentExport { path } => {
-                let log_buffer = LogBuffer::new(100);
-                log_buffer.push_line(format!("Starting operation for path: {}", path.display()));
+            GuiMessage::TriggerIngest {
+                repo_slug,
+                target_project,
+            } => {
+                let log_buffer = LogBuffer::new();
+                log_buffer.push_line(format!(
+                    "Starting ingest operation for repo: {}, target: {}",
+                    repo_slug, target_project
+                ));
 
                 let _ = tx.send(WorkerMessage::CommandStatus {
-                    command_name: "Scanning".to_string(),
-                    is_running: true,
-                    exit_status: None,
-                    log_buffer: log_buffer.clone(),
+                    status: "Running".to_string(),
+                    log: Some(log_buffer.snapshot()),
                 });
 
+                let path = PathBuf::from(&target_project);
                 let config = rustodian_types::ScanConfig::default();
                 let res = custodian.scan(&path, &config).map_err(anyhow::Error::from);
 
-                log_buffer.push_line("Operation completed.".to_string());
+                log_buffer.push_line("Ingest operation completed.".to_string());
 
                 let _ = tx.send(WorkerMessage::CommandStatus {
-                    command_name: "Scanning".to_string(),
-                    is_running: false,
-                    exit_status: Some("finished".to_string()),
-                    log_buffer: log_buffer.clone(),
+                    status: "Finished".to_string(),
+                    log: Some(log_buffer.snapshot()),
                 });
 
-                let _ = tx.send(WorkerMessage::ScanComplete(res));
+                let (success, message) = match res {
+                    Ok(report) => (true, format!("Scan complete: {:?}", report)),
+                    Err(e) => (false, format!("Scan failed: {}", e)),
+                };
+                let _ = tx.send(WorkerMessage::ScanComplete { success, message });
             }
-            GuiMessage::LoadDocContent { path, known_hash } => {
-                // look up project folder
-                let _project = custodian.find_project(&path.to_string_lossy());
-                let content = fs::read_to_string(&path)
+            GuiMessage::TriggerAgentExport { target_project } => {
+                let log_buffer = LogBuffer::new();
+                log_buffer.push_line(format!(
+                    "Starting export operation for target: {}",
+                    target_project
+                ));
+
+                let _ = tx.send(WorkerMessage::CommandStatus {
+                    status: "Running".to_string(),
+                    log: Some(log_buffer.snapshot()),
+                });
+
+                let path = PathBuf::from(&target_project);
+                let config = rustodian_types::ScanConfig::default();
+                let res = custodian.scan(&path, &config).map_err(anyhow::Error::from);
+
+                log_buffer.push_line("Export operation completed.".to_string());
+
+                let _ = tx.send(WorkerMessage::CommandStatus {
+                    status: "Finished".to_string(),
+                    log: Some(log_buffer.snapshot()),
+                });
+
+                let (success, message) = match res {
+                    Ok(report) => (true, format!("Scan complete: {:?}", report)),
+                    Err(e) => (false, format!("Scan failed: {}", e)),
+                };
+                let _ = tx.send(WorkerMessage::ScanComplete { success, message });
+            }
+            GuiMessage::LoadDocContent { path } => {
+                let path_buf = PathBuf::from(&path);
+                current_doc_path = Some(path_buf.clone());
+                let content = fs::read_to_string(&path_buf)
                     .unwrap_or_else(|e| format!("Error reading file: {e}"));
 
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                std::hash::Hash::hash(&content, &mut hasher);
-                let content_hash = std::hash::Hasher::finish(&hasher);
+                let blocks = crate::markdown::parse_markdown(&content);
 
-                if Some(content_hash) == known_hash {
-                    let _ = tx.send(WorkerMessage::DocUnchanged);
-                } else {
-                    let last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
-                    let parsed = crate::markdown::parse_markdown(&content);
-
-                    let _ = tx.send(WorkerMessage::DocLoaded {
-                        content,
-                        parsed,
-                        last_modified,
-                        content_hash,
-                    });
-                }
+                let _ = tx.send(WorkerMessage::DocLoaded { path, blocks });
             }
-            GuiMessage::ToggleTask { task_id, target_content, path } => {
+            GuiMessage::ToggleTask { task_id, completed } => {
+                let path = match &current_doc_path {
+                    Some(p) => p.clone(),
+                    None => {
+                        error!("ToggleTask received but no document is currently loaded.");
+                        continue;
+                    }
+                };
+
                 let content = match fs::read_to_string(&path) {
                     Ok(c) => c,
                     Err(e) => {
@@ -127,16 +158,13 @@ pub fn run_worker(
                 let mut modified = false;
 
                 for line in &mut lines {
-                    let matches_task_id = task_id.as_ref().map_or(false, |id| line.contains(id));
-                    let matches_content = target_content.as_ref().map_or(false, |c| line.contains(c));
-
-                    if matches_task_id || matches_content {
-                        if line.contains("- [ ]") {
+                    if line.contains(&task_id) {
+                        if completed && line.contains("- [ ]") {
                             *line = line.replace("- [ ]", "- [x]");
                             modified = true;
                             info!("Toggled task to checked in {:?}", path);
                             break;
-                        } else if line.contains("- [x]") || line.contains("- [X]") {
+                        } else if !completed && (line.contains("- [x]") || line.contains("- [X]")) {
                             *line = line.replace("- [x]", "- [ ]").replace("- [X]", "- [ ]");
                             modified = true;
                             info!("Toggled task to unchecked in {:?}", path);
@@ -146,17 +174,17 @@ pub fn run_worker(
                 }
 
                 if modified {
-                    let new_content = lines.join("
-") + "
-";
+                    let new_content = lines.join("\n") + "\n";
                     if let Err(e) = fs::write(&path, new_content) {
-                        error!("Failed to write modified file {:?} for ToggleTask: {}", path, e);
+                        error!(
+                            "Failed to write modified file {:?} for ToggleTask: {}",
+                            path, e
+                        );
                     }
                 } else {
                     info!("No matching task found to toggle in {:?}", path);
                 }
             }
-            _ => {}
         }
     }
     Ok(())

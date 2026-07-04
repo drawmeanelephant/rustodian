@@ -1,7 +1,7 @@
-use crate::message::{MarkdownBlock, ParsedMarkdown};
+use crate::message::MarkdownBlock;
 
 /// Parse a raw string into Markdown blocks.
-pub(crate) fn parse_markdown(text: &str) -> ParsedMarkdown {
+pub(crate) fn parse_markdown(text: &str) -> Vec<MarkdownBlock> {
     let mut blocks = Vec::new();
     let mut in_code_block = false;
 
@@ -99,7 +99,7 @@ pub(crate) fn parse_markdown(text: &str) -> ParsedMarkdown {
         });
     }
 
-    ParsedMarkdown { blocks }
+    blocks
 }
 
 fn strip_task_prefix(line: &str, checked: bool) -> Option<&str> {
