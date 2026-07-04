@@ -1,20 +1,51 @@
 //! Message passing types for the Desktop GUI.
 
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+use rustodian_core::log_buffer::LogBuffer;
+use rustodian_types::{Project, ProjectId};
+
 /// Messages sent from the GUI thread to the Background Worker thread.
 pub enum GuiMessage {
-    /// Trigger an ingest operation.
-    TriggerIngest {
-        repo_slug: String,
-        target_project: String,
+    /// Load all projects from the database.
+    LoadProjects,
+    /// Run a command for a project.
+    RunCommand {
+        project_id: ProjectId,
+        project_path: PathBuf,
+        command_name: String,
+        command_str: String,
+        use_shell: bool,
     },
-    /// Trigger an agent export.
-    TriggerAgentExport { target_project: String },
-    /// Request a markdown file payload.
-    LoadDocContent { path: String },
+    /// Kill the currently running command (if any).
+    KillCommand,
+    /// Discover documentation files in a project root.
+    DiscoverDocs { project_path: PathBuf },
+    /// Check if a specific document file is fresh.
+    CheckDocFreshness {
+        path: PathBuf,
+        known_mtime: Option<SystemTime>,
+    },
+    /// Scan projects.
+    ScanProjects { path: PathBuf },
+    /// Purge cruft files.
+    PurgeCruft {
+        project_id: ProjectId,
+        project_path: PathBuf,
+        dry_run: bool,
+    },
+    /// Get dirty files list.
+    GetDirtyFiles { project_path: PathBuf },
+    /// Save a setting to the database.
+    SaveSetting { key: String, value: String },
+    /// Load the content of a specific document file.
+    LoadDocContent {
+        path: PathBuf,
+        known_hash: Option<u64>,
+    },
     /// Update a specific task markdown line checkbox state.
     ToggleTask { task_id: String, completed: bool },
-    /// Signal clean exit.
-    Shutdown,
 }
 
 /// A parsed markdown block.
@@ -30,17 +61,47 @@ pub enum MarkdownBlock {
     BlankLine,
 }
 
+/// Memoized markdown content.
+#[derive(Debug, Clone)]
+pub struct ParsedMarkdown {
+    pub blocks: Vec<MarkdownBlock>,
+}
+
 /// Messages sent from the Background Worker thread to the GUI thread.
 pub enum WorkerMessage {
     /// Streams incremental chunked log lines back to the UI.
-    CommandStatus { status: String, log: Option<String> },
-    /// Signals end of an ingest or scan run.
-    ScanComplete { success: bool, message: String },
+    CommandStatus {
+        command_name: String,
+        is_running: bool,
+        exit_status: Option<String>,
+        log_buffer: LogBuffer,
+    },
+    /// Signals end of a scan run.
+    ScanComplete(Result<rustodian_core::custodian::ScanReport, anyhow::Error>),
     /// Notifies UI of projects available in the store.
-    ProjectsLoaded(Vec<String>),
+    ProjectsLoaded(Result<Vec<Project>, String>),
+    /// Result of discovering documentation files.
+    DocsDiscovered {
+        project_path: PathBuf,
+        available_docs: Vec<(String, PathBuf)>,
+    },
+    DocStale {
+        path: PathBuf,
+    },
+    DocFresh {
+        path: PathBuf,
+    },
+    /// Result of running the digital janitor.
+    CruftPurged(Result<rustodian_core::janitor::JanitorReport, String>),
+    /// Result of getting dirty files from git inspector.
+    DirtyFilesResult(Result<Vec<PathBuf>, String>),
+    /// Result when content has not changed.
+    DocUnchanged,
     /// Returns structural parsed markdown blocks.
     DocLoaded {
-        path: String,
-        blocks: Vec<MarkdownBlock>,
+        content: String,
+        parsed: ParsedMarkdown,
+        last_modified: Option<SystemTime>,
+        content_hash: u64,
     },
 }
