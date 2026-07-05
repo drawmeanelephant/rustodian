@@ -53,7 +53,7 @@ rustodian remote refresh --dest ~/projects
 
 ## Desktop GUI
 
-Rustodian includes a desktop graphical interface built with `eframe`/`egui`. It features a project browser, command runner, a document viewer (for rendering `README.md`, `CHANGELOG.md`, `TODO.md`), and dedicated tabs for Details, Git Context, Tasks, and Runner Logs.
+Rustodian includes a desktop graphical interface built with **Slint**. It features a project browser, command runner, a document viewer (for rendering `README.md`, `CHANGELOG.md`, `TODO.md`), and dedicated tabs for Ingest, Export, Explorer, Logs, and Docs.
 
 To run the desktop app:
 
