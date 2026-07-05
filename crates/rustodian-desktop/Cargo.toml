@@ -17,6 +17,7 @@ rustodian-core = { workspace = true }
 rustodian-storage = { workspace = true }
 rustodian-scanner = { workspace = true }
 rustodian-git = { workspace = true }
+rustodian-remote = { path = "../rustodian-remote" }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
