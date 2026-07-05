@@ -77,6 +77,7 @@ pub fn run_worker(
                 repaint_fn();
             }
             GuiMessage::RunCommand {
+                run_id,
                 project_id,
                 project_path,
                 command_name,
@@ -102,6 +103,7 @@ pub fn run_worker(
                 let log_buffer_clone = log_buffer.clone();
 
                 let _ = tx.send(WorkerMessage::CommandStatus {
+                    run_id,
                     command_name: command_name.clone(),
                     is_running: true,
                     exit_status: None,
@@ -142,6 +144,7 @@ pub fn run_worker(
                                     stdout_log.push_line(line);
                                     if last_send.elapsed() > std::time::Duration::from_millis(100) {
                                         let _ = tx_stdout.send(WorkerMessage::CommandStatus {
+                                            run_id,
                                             command_name: cmd_stdout.clone(),
                                             is_running: true,
                                             exit_status: None,
@@ -169,6 +172,7 @@ pub fn run_worker(
                                     stderr_log.push_line(line);
                                     if last_send.elapsed() > std::time::Duration::from_millis(100) {
                                         let _ = tx_stderr.send(WorkerMessage::CommandStatus {
+                                            run_id,
                                             command_name: cmd_stderr.clone(),
                                             is_running: true,
                                             exit_status: None,
@@ -226,6 +230,7 @@ pub fn run_worker(
                             let _ = store_clone.save_log(&log_record);
 
                             let _ = tx_clone.send(WorkerMessage::CommandStatus {
+                                run_id,
                                 command_name: cmd_name,
                                 is_running: false,
                                 exit_status: Some(if killed {
@@ -242,6 +247,7 @@ pub fn run_worker(
                     Err(e) => {
                         log_buffer.push_line(format!("Failed to spawn process: {e}"));
                         let _ = tx.send(WorkerMessage::CommandStatus {
+                            run_id: uuid::Uuid::default(),
                             command_name,
                             is_running: false,
                             exit_status: Some("spawn error".to_string()),
@@ -360,6 +366,41 @@ pub fn run_worker(
                         last_modified,
                         content_hash,
                     });
+                }
+                repaint_fn();
+            }
+
+            GuiMessage::FetchPullRequests { repo_slug } => {
+                let downloader = rustodian_remote::GithubDownloader::new();
+                match tokio::runtime::Runtime::new() {
+                    Ok(rt) => {
+                        let res = rt.block_on(async {
+                            use rustodian_core::traits::PullRequestFetcher;
+                            downloader.fetch_open_prs(&repo_slug).await
+                        });
+                        match res {
+                            Ok(prs) => {
+                                let _ = tx.send(WorkerMessage::PullRequestsLoaded(Ok(prs)));
+                            }
+                            Err(e) => {
+                                let err_msg = if matches!(
+                                    e,
+                                    rustodian_core::CoreError::RateLimitExceeded
+                                ) {
+                                    "API rate limit exceeded. Set GITHUB_TOKEN to increase limits."
+                                        .to_string()
+                                } else {
+                                    e.to_string()
+                                };
+                                let _ = tx.send(WorkerMessage::PullRequestsLoaded(Err(err_msg)));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkerMessage::PullRequestsLoaded(Err(format!(
+                            "Tokio init failure: {e}"
+                        ))));
+                    }
                 }
                 repaint_fn();
             }
