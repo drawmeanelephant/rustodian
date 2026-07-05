@@ -459,6 +459,10 @@ impl ProjectStore for SqliteStore {
     fn get_latest_log(&self, project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
         SqliteStore::get_latest_log(self, project_id)
     }
+
+    fn prune_logs(&self, project_id: &str, limit: usize) -> Result<usize, CoreError> {
+        SqliteStore::prune_logs(self, project_id, limit)
+    }
 }
 
 impl SqliteStore {

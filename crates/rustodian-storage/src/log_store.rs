@@ -190,6 +190,18 @@ impl SqliteStore {
             None => Ok(None),
         }
     }
+
+    /// Prune old logs for a project, keeping only the `limit` most recent entries.
+    pub fn prune_logs(&self, project_id: &str, limit: usize) -> Result<usize, CoreError> {
+        let conn = self.get_conn()?;
+        let count = conn
+            .execute(
+                "DELETE FROM project_logs WHERE id IN (SELECT id FROM project_logs WHERE project_id = ?1 ORDER BY run_at DESC LIMIT -1 OFFSET ?2)",
+                params![project_id, limit],
+            )
+            .map_err(|e| CoreError::Storage(format!("delete error: {e}")))?;
+        Ok(count)
+    }
 }
 
 #[cfg(test)]

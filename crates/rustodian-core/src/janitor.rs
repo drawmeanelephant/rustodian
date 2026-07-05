@@ -63,38 +63,49 @@ impl<'a> DigitalJanitor<'a> {
                 let size = dir_size(&path).unwrap_or(0);
                 info!(target, size_bytes = size, "Found artifact directory");
 
-                bytes_reclaimed += size;
-                targets_found.push(target.to_string());
-
-                if !dry_run && let Err(e) = fs::remove_dir_all(&path) {
+                if dry_run {
+                    bytes_reclaimed += size;
+                    targets_found.push(target.to_string());
+                } else if let Err(e) = fs::remove_dir_all(&path) {
                     warn!(
                         target,
                         error = %e,
                         "Failed to remove artifact directory"
                     );
+                } else {
+                    bytes_reclaimed += size;
+                    targets_found.push(target.to_string());
                 }
             }
         }
 
-        if !dry_run && !targets_found.is_empty() {
-            #[allow(clippy::cast_precision_loss)]
-            let log_text = format!(
-                "Digital Janitor: purged {:?}. Reclaimed {} bytes ({:.2} MB).",
-                targets_found,
-                bytes_reclaimed,
-                bytes_reclaimed as f64 / 1_048_576.0,
-            );
+        if !dry_run {
+            if !targets_found.is_empty() {
+                #[allow(clippy::cast_precision_loss)]
+                let log_text = format!(
+                    "Digital Janitor: purged {:?}. Reclaimed {} bytes ({:.2} MB).",
+                    targets_found,
+                    bytes_reclaimed,
+                    bytes_reclaimed as f64 / 1_048_576.0,
+                );
 
-            let log_record = ProjectLog {
-                id: uuid::Uuid::new_v4().to_string(),
-                project_id: project.id.to_string(),
-                command_name: "janitor:clean".to_string(),
-                exit_code: Some(0),
-                log_text,
-                run_at: chrono::Utc::now(),
-            };
+                let log_record = ProjectLog {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    project_id: project.id.to_string(),
+                    command_name: "janitor:clean".to_string(),
+                    exit_code: Some(0),
+                    log_text,
+                    run_at: chrono::Utc::now(),
+                };
 
-            self.custodian.store().save_log(&log_record)?;
+                self.custodian.store().save_log(&log_record)?;
+            }
+
+            // Unconditionally prune logs if this is a physical sweep
+            let _ = self
+                .custodian
+                .store()
+                .prune_logs(&project.id.to_string(), 50);
         }
 
         Ok(JanitorReport {
