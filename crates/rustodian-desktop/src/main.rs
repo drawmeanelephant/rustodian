@@ -143,6 +143,12 @@ fn main() -> Result<(), slint::PlatformError> {
     let active_run_id = Arc::new(std::sync::Mutex::new(Option::<Uuid>::None));
     let active_run_id_receiver = Arc::clone(&active_run_id);
 
+    let last_saved_repo_slug = Arc::new(std::sync::Mutex::new(String::new()));
+    let last_saved_target_project = Arc::new(std::sync::Mutex::new(String::new()));
+
+    let last_saved_repo_slug_receiver = Arc::clone(&last_saved_repo_slug);
+    let last_saved_target_project_receiver = Arc::clone(&last_saved_target_project);
+
     let gui_tx_receiver_loop = gui_tx.clone();
     std::thread::spawn(move || {
         while let Ok(msg) = worker_rx.recv() {
@@ -151,9 +157,26 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_run_id_receiver_clone = Arc::clone(&active_run_id_receiver);
             let gui_tx_receiver = gui_tx_receiver_loop.clone();
 
+            let last_slug_cache = Arc::clone(&last_saved_repo_slug_receiver);
+            let last_target_cache = Arc::clone(&last_saved_target_project_receiver);
+
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = window_inner.upgrade() {
                     match msg {
+                        WorkerMessage::SettingsLoaded(settings) => {
+                            if let Some(repo_slug) = settings.get("repo_slug") {
+                                ui.set_repo_slug(repo_slug.as_str().into());
+                                if let Ok(mut lock) = last_slug_cache.lock() {
+                                    (*lock).clone_from(repo_slug);
+                                }
+                            }
+                            if let Some(target_project) = settings.get("target_project") {
+                                ui.set_target_project(target_project.as_str().into());
+                                if let Ok(mut lock) = last_target_cache.lock() {
+                                    (*lock).clone_from(target_project);
+                                }
+                            }
+                        }
                         WorkerMessage::ProjectsLoaded(Ok(rust_projects)) => {
                             if let Ok(mut lock) = cache.lock() {
                                 lock.clone_from(&rust_projects);
@@ -365,6 +388,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Initial load trigger on bootstrap
     let _ = gui_tx.send(GuiMessage::LoadProjects);
+    let _ = gui_tx.send(GuiMessage::LoadSettings);
 
     // Callback: trigger-janitor-clean
     let gui_tx_clone = gui_tx.clone();
@@ -515,6 +539,10 @@ fn main() -> Result<(), slint::PlatformError> {
     // Project selection tracker to pre-populate repository slug from remote
     let active_selected_idx = Arc::new(std::sync::Mutex::new(-1));
 
+    let last_saved_repo_slug_timer = Arc::clone(&last_saved_repo_slug);
+    let last_saved_target_project_timer = Arc::clone(&last_saved_target_project);
+    let gui_tx_timer_clone = gui_tx_timer.clone();
+
     let timer = slint::Timer::default();
     timer.start(
         slint::TimerMode::Repeated,
@@ -522,6 +550,29 @@ fn main() -> Result<(), slint::PlatformError> {
         move || {
             if let Some(win) = window_timer_weak.upgrade() {
                 let selected_idx = win.get_selected_project_index();
+
+                let current_slug = win.get_repo_slug().to_string();
+                let current_target = win.get_target_project().to_string();
+
+                if let Ok(mut last_slug) = last_saved_repo_slug_timer.lock() {
+                    if !current_slug.is_empty() && current_slug != *last_slug {
+                        (*last_slug).clone_from(&current_slug);
+                        let _ = gui_tx_timer_clone.send(GuiMessage::SaveSetting {
+                            key: "repo_slug".to_string(),
+                            value: current_slug,
+                        });
+                    }
+                }
+
+                if let Ok(mut lock) = last_saved_target_project_timer.lock() {
+                    if !current_target.is_empty() && current_target != *lock {
+                        (*lock).clone_from(&current_target);
+                        let _ = gui_tx_timer_clone.send(GuiMessage::SaveSetting {
+                            key: "target_project".to_string(),
+                            value: current_target,
+                        });
+                    }
+                }
 
                 // Track project selection changes to extract repo slug
                 if let Ok(mut last_idx) = active_selected_idx.lock() {
@@ -560,6 +611,12 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         },
     );
+
+    let gui_close_tx = gui_tx.clone();
+    window.window().on_close_requested(move || {
+        let _ = gui_close_tx.send(GuiMessage::KillCommand);
+        slint::CloseRequestResponse::HideWindow
+    });
 
     window.run()
 }

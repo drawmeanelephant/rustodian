@@ -343,6 +343,11 @@ pub fn run_worker(
             GuiMessage::SaveSetting { key, value } => {
                 let _ = state.store.set_setting(&key, &value);
             }
+            GuiMessage::LoadSettings => {
+                let settings = state.store.list_settings().unwrap_or_default();
+                let _ = tx.send(WorkerMessage::SettingsLoaded(settings));
+                repaint_fn();
+            }
 
             GuiMessage::LoadDocContent { path, known_hash } => {
                 current_doc_path = Some(path.clone());
