@@ -1,43 +1,43 @@
 # Environment Isolation in Rustodian
 
-## Why Isolation Matters
-When Rustodian bootstraps and verifies projects, it isolates operations to prevent polluting the host system. This ensures clean, reproducible environments across codebases and avoids version conflicts.
+When Rustodian bootstraps and verifies projects, it isolates operations to prevent host system pollution, ensuring reproducible environments across codebases.
 
 ## Language Command Mapping
 
 | Language | Isolation Mechanism | Setup Command | Verify Command |
 | --- | --- | --- | --- |
-| Rust | Cargo (`target/`) | `cargo build` | `cargo test` |
-| Node | Local `node_modules` | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
-| Go | Local `GOPATH` override to `.gopath` | `go mod download` | `go test ./...` |
-| Python | Virtual Env (`.venv`) | Unix: `.venv/bin/pip install [-r requirements.txt\|.]`<br>Win: `.venv\Scripts\pip install [-r requirements.txt\|.]` | Unix: `.venv/bin/pytest -v` (fallback: `.venv/bin/python -m unittest discover`)<br>Win: `.venv\Scripts\pytest -v` (fallback: `.venv\Scripts\python -m unittest discover`) |
+| Rust | No isolation (native `target/`) | `cargo build` | `cargo test` |
+| Node | Local `node_modules` directory | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
+| Go | `GOPATH` env var override to `.gopath` | `go mod download` | `go test ./...` |
+| Python | Virtual Env (`.venv`) directory | Unix: `.venv/bin/pip install -r requirements.txt`<br>and/or `.venv/bin/pip install .`<br>Win: `.venv\Scripts\pip install -r requirements.txt`<br>and/or `.venv\Scripts\pip install .` | Unix: `.venv/bin/pytest -v`<br>(fallback: `.venv/bin/python -m unittest discover`)<br>Win: `.venv\Scripts\pytest -v`<br>(fallback: `.venv\Scripts\python -m unittest discover`) |
 
 ## Isolation Strategies
 
-**Rust:** Cargo isolates builds natively in the `target/` directory.
+**Rust:** Builds natively in the `target/` directory with no additional isolation.
 
-**Node.js:** Dependencies are isolated in the local `node_modules` directory. Rustodian detects lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`) to use the correct package manager (with `npm` as fallback).
+**Node.js:** Dependencies are localized in `node_modules`. Rustodian detects lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`) to select the package manager, with `npm` as the fallback.
 
-**Go:** To prevent global module cache pollution, Rustodian overrides the global `GOPATH` environment variable with a project-local `.gopath` directory before running.
+**Go:** Rustodian overrides the global `GOPATH` environment variable to a project-local `.gopath` directory, protecting the global module cache.
 
-**Python:** Rustodian strictly uses a Virtual Environment (`.venv`) to isolate packages:
-1. Attempts creation with `python3 -m venv .venv`, falling back to `python -m venv .venv`.
-2. Dependencies are installed using the local `pip` (`install -r requirements.txt` or `install .`), with paths resolving dynamically by OS (Unix: `.venv/bin/pip`, Windows: `.venv\Scripts\pip`).
-3. Verification runs via the local `pytest -v`, falling back to `python -m unittest discover` using OS-specific executable paths.
+**Python:** Rustodian uses a Virtual Environment (`.venv`):
+1. Attempts creation via `python3 -m venv .venv`, falling back to `python -m venv .venv`.
+2. Installs dependencies sequentially: runs `pip install -r requirements.txt` if `requirements.txt` exists; runs `pip install .` if `pyproject.toml` or `setup.py` exists (using `.venv/bin/pip` on Unix or `.venv\Scripts\pip` on Windows).
+3. Verifies via local `pytest -v` if the executable exists, falling back to `python -m unittest discover` (using `.venv/bin/` on Unix or `.venv\Scripts\` on Windows).
 
 ## Example: Mixed-Language Monorepo
-Consider a monorepo containing a frontend and backend:
+
 ```text
 my-monorepo/
 ├── frontend/ (Node)
 │   ├── pnpm-lock.yaml
 │   └── package.json
 └── backend/ (Python)
-    ├── requirements.txt
+    ├── pyproject.toml
     └── main.py
 ```
+
 When Rustodian scans this directory:
-1. **Frontend:** It detects `pnpm-lock.yaml`, isolating dependencies in `frontend/node_modules/` via `pnpm install`, and verifies with `pnpm test`.
-2. **Backend:** It creates `backend/.venv`. On Unix, it installs dependencies using `backend/.venv/bin/pip install -r requirements.txt` and verifies with `backend/.venv/bin/pytest -v` (or `unittest` if `pytest` is absent). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
+1. **Frontend:** It detects `pnpm-lock.yaml`, isolating dependencies in `frontend/node_modules/` via `pnpm install`, and verifies using `pnpm test`.
+2. **Backend:** It creates `backend/.venv`. On Unix, it runs `backend/.venv/bin/pip install .` and verifies with `backend/.venv/bin/pytest -v` (or `unittest`). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
 
 Neither project affects the host system's global state or each other.
