@@ -344,14 +344,11 @@ pub fn run_worker(
                     }
                 };
 
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        continue;
-                    }
+                let Ok(content) = fs::read_to_string(&path) else {
+                    continue;
                 };
 
-                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                let mut lines: Vec<String> = content.lines().map(ToString::to_string).collect();
                 let mut modified = false;
 
                 for line in &mut lines {
