@@ -5003,6 +5003,7 @@ dependencies = [
  "rustodian-types",
  "slint",
  "slint-build",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",

@@ -107,11 +107,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let projects_cache_clone = Arc::clone(&projects_cache);
 
     let gui_tx_receiver_loop = gui_tx.clone();
+    let active_run_id = Arc::new(std::sync::Mutex::new(None::<uuid::Uuid>));
     std::thread::spawn(move || {
         while let Ok(msg) = worker_rx.recv() {
             let window_inner = window_receiver_weak.clone();
             let cache = Arc::clone(&projects_cache_clone);
             let gui_tx_receiver = gui_tx_receiver_loop.clone();
+            let active_run_id_clone = active_run_id.clone();
 
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = window_inner.upgrade() {
@@ -128,11 +130,21 @@ fn main() -> Result<(), slint::PlatformError> {
                             ui.set_stream_logs(format!("[Storage Error] {err}\n").into());
                         }
                         WorkerMessage::CommandStatus {
+                            run_id,
                             command_name: _,
                             is_running,
                             exit_status,
                             log_buffer,
                         } => {
+                            let mut active_run_id_lock = active_run_id_clone.lock().unwrap();
+                            if active_run_id_lock.is_some() && *active_run_id_lock != Some(run_id) {
+                                return;
+                            }
+                            if is_running {
+                                *active_run_id_lock = Some(run_id);
+                            } else {
+                                *active_run_id_lock = None;
+                            }
                             ui.set_working(is_running);
 
                             // Map the log buffer incrementally to the console area
@@ -165,45 +177,72 @@ fn main() -> Result<(), slint::PlatformError> {
                             let slint_blocks: Vec<SlintMarkdownBlock> = parsed
                                 .blocks
                                 .into_iter()
-                                .filter_map(|block| {
+                                .map(|block| {
                                     match block {
                                         MarkdownBlock::Header { level, text } => {
-                                            Some(SlintMarkdownBlock {
+                                            SlintMarkdownBlock {
                                                 block_type: "heading".into(),
                                                 content: text.into(),
                                                 level: level.try_into().unwrap_or(0),
                                                 is_checked: false,
                                                 task_id: "".into(),
-                                            })
+                                            }
                                         }
-                                        MarkdownBlock::Text { text } => Some(SlintMarkdownBlock {
+                                        MarkdownBlock::Text { text } => SlintMarkdownBlock {
                                             block_type: "paragraph".into(),
                                             content: text.into(),
                                             level: 0,
                                             is_checked: false,
                                             task_id: "".into(),
-                                        }),
-                                        MarkdownBlock::CodeFence { text } => {
-                                            Some(SlintMarkdownBlock {
-                                                block_type: "code".into(),
-                                                content: text.into(),
+                                        },
+                                        MarkdownBlock::CodeFence { text } => SlintMarkdownBlock {
+                                            block_type: "code".into(),
+                                            content: text.into(),
+                                            level: 0,
+                                            is_checked: false,
+                                            task_id: "".into(),
+                                        },
+                                        MarkdownBlock::BulletList { text } => SlintMarkdownBlock {
+                                            block_type: "bullet".into(),
+                                            content: text.into(),
+                                            level: 0,
+                                            is_checked: false,
+                                            task_id: "".into(),
+                                        },
+                                        MarkdownBlock::NumberedList { number, text } => {
+                                            SlintMarkdownBlock {
+                                                block_type: "numbered".into(),
+                                                content: format!("{number}. {text}").into(),
                                                 level: 0,
                                                 is_checked: false,
                                                 task_id: "".into(),
-                                            })
+                                            }
                                         }
+                                        MarkdownBlock::HorizontalRule => SlintMarkdownBlock {
+                                            block_type: "hr".into(),
+                                            content: "".into(),
+                                            level: 0,
+                                            is_checked: false,
+                                            task_id: "".into(),
+                                        },
+                                        MarkdownBlock::BlankLine => SlintMarkdownBlock {
+                                            block_type: "blank".into(),
+                                            content: "".into(),
+                                            level: 0,
+                                            is_checked: false,
+                                            task_id: "".into(),
+                                        },
                                         MarkdownBlock::Task { text, checked } => {
                                             // Simple task indexing/identifier generation
                                             let task_id = text.clone();
-                                            Some(SlintMarkdownBlock {
+                                            SlintMarkdownBlock {
                                                 block_type: "task".into(),
                                                 content: text.into(),
                                                 level: 0,
                                                 is_checked: checked,
                                                 task_id: task_id.into(),
-                                            })
+                                            }
                                         }
-                                        _ => None, // Handle other structural variants (BlankLines, HorizontalRules)
                                     }
                                 })
                                 .collect();
@@ -361,7 +400,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         .iter()
                         .find(|c| c.name == cmd_name_str)
                     {
+                        let run_id = uuid::Uuid::new_v4();
                         let _ = gui_tx_clone.send(GuiMessage::RunCommand {
+                            run_id,
                             project_id: proj.id.clone(),
                             project_path: proj.path.clone(),
                             command_name: cmd.name.clone(),

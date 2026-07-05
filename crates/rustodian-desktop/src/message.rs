@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::time::SystemTime;
+use uuid::Uuid;
 
 use rustodian_core::log_buffer::LogBuffer;
 use rustodian_types::{Project, ProjectId};
@@ -12,6 +13,7 @@ pub enum GuiMessage {
     LoadProjects,
     /// Run a command for a project.
     RunCommand {
+        run_id: Uuid,
         project_id: ProjectId,
         project_path: PathBuf,
         command_name: String,
@@ -46,6 +48,8 @@ pub enum GuiMessage {
     },
     /// Update a specific task markdown line checkbox state.
     ToggleTask { task_id: String, completed: bool },
+    /// Fetch open pull requests for a given repository slug.
+    FetchPullRequests { repo_slug: String },
 }
 
 /// A parsed markdown block.
@@ -71,6 +75,7 @@ pub struct ParsedMarkdown {
 pub enum WorkerMessage {
     /// Streams incremental chunked log lines back to the UI.
     CommandStatus {
+        run_id: Uuid,
         command_name: String,
         is_running: bool,
         exit_status: Option<String>,
@@ -104,4 +109,6 @@ pub enum WorkerMessage {
         last_modified: Option<SystemTime>,
         content_hash: u64,
     },
+    /// Returns fetched Pull Requests.
+    PullRequestsLoaded(Result<Vec<rustodian_types::PullRequest>, String>),
 }
