@@ -137,7 +137,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
                             // Map the log buffer incrementally to the console area
                             let full_logs = log_buffer.snapshot();
-                            ui.set_stream_logs(full_logs.into());
+                            let current_logs = ui.get_stream_logs();
+                            if full_logs.len() != current_logs.as_str().len() {
+                                ui.set_stream_logs(full_logs.into());
+                            }
 
                             if let Some(status) = exit_status {
                                 let current_logs = ui.get_stream_logs().to_string();

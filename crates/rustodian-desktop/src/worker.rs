@@ -129,26 +129,54 @@ pub fn run_worker(
 
                         let stdout_log = log_buffer.clone();
                         let mut stdout_handle = None;
+                        let tx_stdout = tx.clone();
+                        let repaint_stdout = repaint_fn.clone();
+                        let cmd_stdout = command_name.clone();
 
                         if let Some(so) = stdout {
                             stdout_handle = Some(thread::spawn(move || {
                                 use std::io::{BufRead, BufReader};
                                 let reader = BufReader::new(so);
+                                let mut last_send = std::time::Instant::now();
                                 for line in reader.lines().map_while(Result::ok) {
                                     stdout_log.push_line(line);
+                                    if last_send.elapsed() > std::time::Duration::from_millis(100) {
+                                        let _ = tx_stdout.send(WorkerMessage::CommandStatus {
+                                            command_name: cmd_stdout.clone(),
+                                            is_running: true,
+                                            exit_status: None,
+                                            log_buffer: stdout_log.clone(),
+                                        });
+                                        repaint_stdout();
+                                        last_send = std::time::Instant::now();
+                                    }
                                 }
                             }));
                         }
 
                         let stderr_log = log_buffer.clone();
                         let mut stderr_handle = None;
+                        let tx_stderr = tx.clone();
+                        let repaint_stderr = repaint_fn.clone();
+                        let cmd_stderr = command_name.clone();
 
                         if let Some(se) = stderr {
                             stderr_handle = Some(thread::spawn(move || {
                                 use std::io::{BufRead, BufReader};
                                 let reader = BufReader::new(se);
+                                let mut last_send = std::time::Instant::now();
                                 for line in reader.lines().map_while(Result::ok) {
                                     stderr_log.push_line(line);
+                                    if last_send.elapsed() > std::time::Duration::from_millis(100) {
+                                        let _ = tx_stderr.send(WorkerMessage::CommandStatus {
+                                            command_name: cmd_stderr.clone(),
+                                            is_running: true,
+                                            exit_status: None,
+                                            log_buffer: stderr_log.clone(),
+                                        });
+                                        repaint_stderr();
+                                        last_send = std::time::Instant::now();
+                                    }
                                 }
                             }));
                         }
