@@ -12,7 +12,23 @@ pub mod ui_mapping {
     use slint::{ModelRc, SharedString, VecModel};
 
     pub fn map_project(project: &Project) -> SlintProject {
+        let (branch, dirty_status) = if let Some(ref vcs) = project.vcs {
+            (
+                vcs.branch.clone().unwrap_or_else(|| "detached".to_string()),
+                if vcs.is_dirty {
+                    "Dirty ⚠️"
+                } else {
+                    "Clean"
+                },
+            )
+        } else {
+            ("No Git Repo".to_string(), "Clean")
+        };
+
         SlintProject {
+            id: SharedString::from(project.id.to_string()),
+            git_branch: SharedString::from(branch),
+            git_status: SharedString::from(dirty_status),
             name: SharedString::from(project.name.clone()),
             path: SharedString::from(project.path.to_string_lossy().into_owned()),
             discovery_date: SharedString::from(project.discovered_at.to_rfc3339()),
@@ -45,6 +61,7 @@ use crate::message::{GuiMessage, MarkdownBlock, WorkerMessage};
 use crate::ui_mapping::map_projects;
 use rustodian_storage::SqliteStore;
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -89,10 +106,12 @@ fn main() -> Result<(), slint::PlatformError> {
     let projects_cache = Arc::new(std::sync::Mutex::new(Vec::<rustodian_types::Project>::new()));
     let projects_cache_clone = Arc::clone(&projects_cache);
 
+    let gui_tx_receiver_loop = gui_tx.clone();
     std::thread::spawn(move || {
         while let Ok(msg) = worker_rx.recv() {
             let window_inner = window_receiver_weak.clone();
             let cache = Arc::clone(&projects_cache_clone);
+            let gui_tx_receiver = gui_tx_receiver_loop.clone();
 
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = window_inner.upgrade() {
@@ -204,6 +223,56 @@ fn main() -> Result<(), slint::PlatformError> {
                                 format!("[Scan Error] Failed to scan path: {e}\n").into(),
                             );
                         }
+                        #[allow(clippy::cast_precision_loss)]
+                        WorkerMessage::CruftPurged(Ok(report)) => {
+                            ui.set_working(false);
+                            let bytes = report.bytes_reclaimed;
+                            let formatted_size = if bytes == 0 {
+                                "0 B".to_string()
+                            } else if bytes < 1024 {
+                                format!("{bytes} B")
+                            } else if bytes < 1024 * 1024 {
+                                format!("{:.2} KB", (bytes as f64) / 1024.0)
+                            } else {
+                                format!("{:.2} MB", (bytes as f64) / (1024.0 * 1024.0))
+                            };
+                            ui.set_janitor_bytes_reclaimable(formatted_size.clone().into());
+                            if report.dry_run {
+                                ui.set_janitor_status(
+                                    format!(
+                                        "Inspection complete. Found {} targets.",
+                                        report.targets_found.len()
+                                    )
+                                    .into(),
+                                );
+                            } else {
+                                ui.set_janitor_status(
+                                    format!(
+                                        "Purged {} targets successfully.",
+                                        report.targets_found.len()
+                                    )
+                                    .into(),
+                                );
+                                let mut logs = ui.get_stream_logs().to_string();
+                                let _ = write!(
+                                    logs,
+                                    "\n[Janitor] Purged targets: {:?}. Space reclaimed: {formatted_size}\n",
+                                    report.targets_found
+                                );
+                                ui.set_stream_logs(logs.into());
+                            }
+                        }
+                        WorkerMessage::CruftPurged(Err(err)) => {
+                            ui.set_working(false);
+                            ui.set_janitor_status(format!("Janitor Error: {err}").into());
+                        }
+                        WorkerMessage::DocStale { path } => {
+                            let _ = gui_tx_receiver.send(GuiMessage::LoadDocContent {
+                                path,
+                                known_hash: None,
+                            });
+                        }
+
                         _ => {}
                     }
                 }
@@ -215,6 +284,35 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Initial load trigger on bootstrap
     let _ = gui_tx.send(GuiMessage::LoadProjects);
+
+    // Callback: trigger-janitor-clean
+    let gui_tx_clone = gui_tx.clone();
+    let window_weak_clone = window.as_weak();
+    let cache_ref_janitor = Arc::clone(&projects_cache);
+
+    window.on_trigger_janitor_clean(move |proj_id_str, dry_run| {
+        if let Some(win) = window_weak_clone.upgrade() {
+            if let Ok(lock) = cache_ref_janitor.lock() {
+                if let Some(proj) = lock
+                    .iter()
+                    .find(|p| p.id.to_string() == proj_id_str.as_str())
+                {
+                    win.set_working(true);
+                    win.set_janitor_status(if dry_run {
+                        "Scanning workspace...".into()
+                    } else {
+                        "Purging workspace...".into()
+                    });
+
+                    let _ = gui_tx_clone.send(GuiMessage::PurgeCruft {
+                        project_id: proj.id.clone(),
+                        project_path: proj.path.clone(),
+                        dry_run,
+                    });
+                }
+            }
+        }
+    });
 
     // Callback: trigger-ingest
     let gui_tx_clone = gui_tx.clone();
@@ -299,5 +397,35 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     // Run application window loop blocks
+    let gui_tx_timer = gui_tx.clone();
+    let window_timer_weak = window.as_weak();
+    let last_mtime_checked = Arc::new(std::sync::Mutex::new(None));
+    let cache_ref_timer = Arc::clone(&projects_cache);
+
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_secs(2),
+        move || {
+            if let Some(win) = window_timer_weak.upgrade() {
+                let selected_idx = win.get_selected_project_index();
+                if selected_idx >= 0 && win.get_active_page() == 4 {
+                    // Only poll if viewing Docs tab
+                    if let Ok(lock) = cache_ref_timer.lock() {
+                        if let Some(proj) = lock.get(selected_idx as usize) {
+                            let readme_path = proj.path.join("README.md");
+                            if readme_path.exists() {
+                                let _ = gui_tx_timer.send(GuiMessage::CheckDocFreshness {
+                                    path: readme_path,
+                                    known_mtime: *last_mtime_checked.lock().unwrap(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    );
+
     window.run()
 }

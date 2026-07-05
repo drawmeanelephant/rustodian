@@ -7,6 +7,9 @@ export struct SlintProjectCommand {
 }
 
 export struct SlintProject {
+    id: string,
+    git_branch: string,
+    git_status: string,
     name: string,
     path: string,
     discovery_date: string,
@@ -58,6 +61,11 @@ export component PipelineWindow inherits Window {
     in property <[SlintProject]> projects;
     in-out property <int> selected-project-index: -1;
     in property <[SlintMarkdownBlock]> doc-blocks;
+
+    in-out property <string> janitor-status: "";
+    in-out property <string> janitor-bytes-reclaimable: "0 B";
+
+    callback trigger-janitor-clean(string, bool); // (project_id, dry_run)
 
     callback trigger-ingest();
     callback trigger-agent-export();
@@ -171,6 +179,16 @@ export component PipelineWindow inherits Window {
                                         x: 12px;
                                         vertical-alignment: center;
                                     }
+                                    if project.git_branch != "No Git Repo" : Rectangle {
+                                        background: #334155;
+                                        border-radius: 4px;
+                                        width: 10px;
+                                        height: 10px;
+                                        x: 220px;
+                                        y: 15px;
+                                        border-color: project.git_status == "Clean" ? #22c55e : #ef4444;
+                                        border-width: 2px;
+                                    }
                                 }
                             }
                         }
@@ -195,9 +213,73 @@ export component PipelineWindow inherits Window {
                                 color: #94a3b8;
                             }
                             Text {
+                                text: "Git Branch: " + root.projects[root.selected-project-index].git_branch;
+                                color: #94a3b8;
+                            }
+                            Text {
+                                text: "Git Status: " + root.projects[root.selected-project-index].git_status;
+                                color: root.projects[root.selected-project-index].git_status == "Clean" ? #22c55e : #ef4444;
+                            }
+                            Text {
                                 text: "Discovered: " + root.projects[root.selected-project-index].discovery_date;
                                 color: #94a3b8;
                             }
+
+                            // Digital Janitor Section
+                            Rectangle {
+                                background: #0f172a;
+                                border-radius: 6px;
+                                border-color: #334155;
+                                border-width: 1px;
+                                height: 100px;
+
+                                HorizontalLayout {
+                                    padding: 12px;
+                                    spacing: 16px;
+                                    alignment: space-between;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "🧹 Digital Janitor";
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            color: white;
+                                        }
+                                        Text {
+                                            text: "Reclaimable Cruft: " + root.janitor-bytes-reclaimable;
+                                            font-size: 12px;
+                                            color: #f59e0b;
+                                        }
+                                        if root.janitor-status != "" : Text {
+                                            text: root.janitor-status;
+                                            font-size: 11px;
+                                            color: #94a3b8;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: center;
+                                        Button {
+                                            text: "Scan Cruft";
+                                            enabled: !root.working;
+                                            clicked => {
+                                                root.trigger-janitor-clean(root.projects[root.selected-project-index].id, true);
+                                            }
+                                        }
+                                        Button {
+                                            text: "Purge Cruft";
+                                            enabled: !root.working;
+                                            clicked => {
+                                                root.trigger-janitor-clean(root.projects[root.selected-project-index].id, false);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             Text {
                                 text: "Commands:";
                                 color: #cbd5e1;
