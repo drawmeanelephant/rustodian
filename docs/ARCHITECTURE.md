@@ -93,7 +93,7 @@ Rationale: A CLI tool that waits on filesystem I/O and SQLite gains nothing from
 
 ## Desktop UI Note
 
-The desktop application (`rustodian-desktop`) includes a project browser, command runner, doc viewer, and several tabs. Note that the **Pull Requests** tab in the desktop app is currently a placeholder and is not yet implemented.
+The desktop application (`rustodian-desktop`) includes a project browser, command runner, doc viewer, and several tabs built with **Slint UI**. Note that the **Pull Requests** tab in the desktop app is currently a placeholder and is not yet implemented.
 
 ## Future Extension Points
 
