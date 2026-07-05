@@ -244,6 +244,7 @@ impl Custodian {
         };
 
         self.store.save_log(&log_record)?;
+        let _ = self.store.prune_logs(&project.id.to_string(), 50);
 
         Ok(exit_code)
     }
@@ -366,6 +367,9 @@ mod tests {
         }
         fn get_latest_log(&self, _project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
             Ok(None)
+        }
+        fn prune_logs(&self, _project_id: &str, _limit: usize) -> Result<usize, CoreError> {
+            Ok(0)
         }
     }
 

@@ -49,6 +49,9 @@ pub trait ProjectStore: Send + Sync {
 
     /// Get the most recent log entry for a project.
     fn get_latest_log(&self, project_id: &str) -> Result<Option<ProjectLog>, CoreError>;
+
+    /// Prune old logs for a project, keeping only the `limit` most recent entries. Returns the number of deleted rows.
+    fn prune_logs(&self, project_id: &str, limit: usize) -> Result<usize, CoreError>;
 }
 
 /// Contract for filesystem project discovery.

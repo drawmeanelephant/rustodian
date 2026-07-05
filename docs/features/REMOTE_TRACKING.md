@@ -1,12 +1,11 @@
 # Remote Repository Tracking
 
-**⚠️ PULL REQUESTS: NOT YET IMPLEMENTED IN DESKTOP**
-While backend fetching logic in `rustodian-remote` is fully functional and tested, the Pull Requests tab in `rustodian-desktop` is currently a placeholder and not wired up to display fetched PR data.
-
 This document outlines the remote repository tracking features implemented in the `rustodian-remote` crate, specifically focusing on `GithubDownloader` in `crates/rustodian-remote/src/downloader.rs`.
 
 ## Pull Requests
 The `PullRequestFetcher` trait defines the interface for fetching open PRs. `GithubDownloader` implements this trait, fetching PR metadata (number, title, author, branch, url, update time, and draft status) from the GitHub API.
+
+In the desktop UI (`rustodian-desktop`), the Slint UI interacts with the async `PullRequestFetcher` trait via background thread messaging. When the UI dispatches a message over the worker channel, the background worker creates a short-lived, local `Tokio` runtime to bridge the synchronous event loop and the async PR fetching logic without blocking the main thread.
 
 ## GithubDownloader Flow
 When downloading an archive, `GithubDownloader` requests the `main` branch tarball (`/archive/refs/heads/main.tar.gz`). If it receives a `404 Not Found`, it automatically falls back to `master` (`/archive/refs/heads/master.tar.gz`), ensuring compatibility with both new and legacy branch naming conventions.

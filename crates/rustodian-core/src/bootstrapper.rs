@@ -313,6 +313,9 @@ mod tests {
         ) -> Result<Option<rustodian_types::ProjectLog>, CoreError> {
             Ok(None)
         }
+        fn prune_logs(&self, _project_id: &str, _limit: usize) -> Result<usize, CoreError> {
+            Ok(0)
+        }
     }
 
     struct MockScanner;
