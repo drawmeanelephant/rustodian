@@ -85,13 +85,14 @@ pub fn run_worker(
                 use_shell,
             } => {
                 // Kill any existing process first
-                if let Some(proc_arc) = state.running_process.take()
-                    && !state
+                if let Some(proc_arc) = state.running_process.take() {
+                    if !state
                         .process_exited
                         .load(std::sync::atomic::Ordering::SeqCst)
-                {
-                    let mut proc = proc_arc.lock().unwrap();
-                    let _ = proc.kill();
+                    {
+                        let mut proc = proc_arc.lock().unwrap();
+                        let _ = proc.kill();
+                    }
                 }
                 *state.is_running.lock().unwrap() = true;
                 *state.should_kill.lock().unwrap() = false;
@@ -185,8 +186,6 @@ pub fn run_worker(
                             }));
                         }
 
-                        // We need to spawn another thread to wait for the process to finish,
-                        // so we don't block the worker loop which needs to process KillCommand
                         let is_running_clone = state.is_running.clone();
                         let tx_clone = tx.clone();
                         let store_clone = state.store.clone();
@@ -247,7 +246,7 @@ pub fn run_worker(
                     Err(e) => {
                         log_buffer.push_line(format!("Failed to spawn process: {e}"));
                         let _ = tx.send(WorkerMessage::CommandStatus {
-                            run_id: uuid::Uuid::default(),
+                            run_id,
                             command_name,
                             is_running: false,
                             exit_status: Some("spawn error".to_string()),
@@ -370,41 +369,6 @@ pub fn run_worker(
                 repaint_fn();
             }
 
-            GuiMessage::FetchPullRequests { repo_slug } => {
-                let downloader = rustodian_remote::GithubDownloader::new();
-                match tokio::runtime::Runtime::new() {
-                    Ok(rt) => {
-                        let res = rt.block_on(async {
-                            use rustodian_core::traits::PullRequestFetcher;
-                            downloader.fetch_open_prs(&repo_slug).await
-                        });
-                        match res {
-                            Ok(prs) => {
-                                let _ = tx.send(WorkerMessage::PullRequestsLoaded(Ok(prs)));
-                            }
-                            Err(e) => {
-                                let err_msg = if matches!(
-                                    e,
-                                    rustodian_core::CoreError::RateLimitExceeded
-                                ) {
-                                    "API rate limit exceeded. Set GITHUB_TOKEN to increase limits."
-                                        .to_string()
-                                } else {
-                                    e.to_string()
-                                };
-                                let _ = tx.send(WorkerMessage::PullRequestsLoaded(Err(err_msg)));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(WorkerMessage::PullRequestsLoaded(Err(format!(
-                            "Tokio init failure: {e}"
-                        ))));
-                    }
-                }
-                repaint_fn();
-            }
-
             GuiMessage::ToggleTask { task_id, completed } => {
                 let path = match &current_doc_path {
                     Some(p) => p.clone(),
@@ -438,6 +402,44 @@ pub fn run_worker(
                     let new_content = lines.join("\n") + "\n";
                     let _ = fs::write(&path, new_content);
                 }
+            }
+
+            GuiMessage::FetchPullRequests { repo_slug } => {
+                let downloader = rustodian_remote::GithubDownloader::new();
+
+                // Build a short-lived Tokio context for the sync worker
+                match tokio::runtime::Runtime::new() {
+                    Ok(rt) => {
+                        let res = rt.block_on(async {
+                            use rustodian_core::traits::PullRequestFetcher;
+                            downloader.fetch_open_prs(&repo_slug).await
+                        });
+
+                        match res {
+                            Ok(prs) => {
+                                let _ = tx.send(WorkerMessage::PullRequestsLoaded(Ok(prs)));
+                            }
+                            Err(e) => {
+                                let err_msg = if matches!(
+                                    e,
+                                    rustodian_core::CoreError::RateLimitExceeded
+                                ) {
+                                    "API rate limit exceeded. Set GITHUB_TOKEN to increase limits."
+                                        .to_string()
+                                } else {
+                                    e.to_string()
+                                };
+                                let _ = tx.send(WorkerMessage::PullRequestsLoaded(Err(err_msg)));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkerMessage::PullRequestsLoaded(Err(format!(
+                            "Tokio init failure: {e}"
+                        ))));
+                    }
+                }
+                repaint_fn();
             }
         }
     }
