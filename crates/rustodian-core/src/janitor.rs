@@ -66,17 +66,15 @@ impl<'a> DigitalJanitor<'a> {
                 if dry_run {
                     bytes_reclaimed += size;
                     targets_found.push(target.to_string());
+                } else if let Err(e) = fs::remove_dir_all(&path) {
+                    warn!(
+                        target,
+                        error = %e,
+                        "Failed to remove artifact directory"
+                    );
                 } else {
-                    if let Err(e) = fs::remove_dir_all(&path) {
-                        warn!(
-                            target,
-                            error = %e,
-                            "Failed to remove artifact directory"
-                        );
-                    } else {
-                        bytes_reclaimed += size;
-                        targets_found.push(target.to_string());
-                    }
+                    bytes_reclaimed += size;
+                    targets_found.push(target.to_string());
                 }
             }
         }
@@ -104,7 +102,10 @@ impl<'a> DigitalJanitor<'a> {
             }
 
             // Unconditionally prune logs if this is a physical sweep
-            let _ = self.custodian.store().prune_logs(&project.id.to_string(), 50);
+            let _ = self
+                .custodian
+                .store()
+                .prune_logs(&project.id.to_string(), 50);
         }
 
         Ok(JanitorReport {
