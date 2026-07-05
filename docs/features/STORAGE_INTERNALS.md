@@ -50,41 +50,38 @@ CREATE TABLE project_logs (
     log_text     TEXT NOT NULL DEFAULT '',
     run_at       TEXT NOT NULL
 );
+
+CREATE INDEX idx_projects_path ON projects(path);
+CREATE INDEX idx_scans_started ON scans(started_at DESC);
+CREATE INDEX idx_project_logs_project ON project_logs(project_id, run_at DESC);
 ```
 
-## Connection Pool and Concurrency
+## Concurrency
 
-Rustodian utilizes `r2d2` for an SQLite connection pool. The database is configured to use Write-Ahead Logging (`PRAGMA journal_mode = WAL`), which significantly improves concurrent access by allowing readers to operate alongside a writer. This is critical for the desktop app where background scans write data while the UI queries it.
+Rustodian uses `r2d2` for pooling and Write-Ahead Logging (`WAL`), aiding concurrent access. This prevents locks in the desktop app during background scans. A `busy_timeout = 5000` prevents transient failures if locked.
 
-To ensure smooth concurrency, `busy_timeout = 5000` is configured. If the database is locked by a writer, this instructs SQLite to wait up to 5 seconds before returning a lock error, preventing transient UI failures.
+## Upserts
 
-## Upserting Projects
-
-Projects are updated using an upsert pattern via `ON CONFLICT(path) DO UPDATE`. The `path` field is treated as the unique disk identifier. When a conflict occurs (meaning the project was already discovered in a previous scan), the upsert command updates fields such as `name`, `last_scanned_at`, `metadata_json`, and notably `discovered_at` (`discovered_at=excluded.discovered_at`).
-
-During upserts, the `project_languages` table uses a delete-and-reinsert pattern. Existing language records for the ID are deleted and new ones inserted, which cleanly syncs data without tracking individual row changes.
+Projects use `ON CONFLICT(path) DO UPDATE`. Notably, `discovered_at` is updated during upserts (`discovered_at=excluded.discovered_at`). `project_languages` uses delete-and-reinsert to sync cleanly.
 
 ## JSON Metadata Strategy
 
-Instead of a normalized schema with strict, explicit columns for varying domains like VCS status, CI features, or languages, Rustodian uses a hybrid approach. The `metadata_json` column stores a JSON blob containing this data.
+Instead of strict columns, `metadata_json` stores a blob structured as: `{"meta": project.metadata, "vcs": project.vcs, "languages": project.languages}`.
 
-**Why JSON?** Packing this into JSON keeps the schema highly stable as the domain evolves. It avoids brittle, tedious SQL schema migrations every time a new metadata field is added to a project. This allows for rapid development on Rust structs (which `serde_json` maps natively to the blob).
+**Why JSON?** Keeps the schema stable and avoids migrations when domains evolve, allowing rapid struct development via `serde_json`.
 
-## Project Languages Side Table
+## Languages Side Table
 
-While language data technically exists within the `metadata_json` blob, there is also a dedicated `project_languages` side-table.
+**Why a side-table?** Purely for read performance. SQLite's `json_extract` is slow over thousands of rows; this table guarantees fast filtering for desktop views.
 
-**Why a side-table?** This relational table exists purely for read performance. Standard SQLite JSON querying (`json_extract`) is slower to index and query over thousands of rows. Offloading this metric to a dedicated table guarantees high-performance filtering and sorting for desktop views.
+## Deserialization
 
-## Row Deserialization
+`parse_project_row` centralizes translation to `Project` structs to avoid boilerplate.
 
-To avoid boilerplate, row deserialization into a `Project` struct is centralized in `parse_project_row`. This shared utility is used by read operations like `get_project` and `list_projects`, serving as the single truth for translating SQLite into Rust.
+## Tradeoffs
 
-## Known Tradeoffs
-
-The storage layer design includes several notable tradeoffs:
-
-- **Malformed Record Handling**: If `parse_project_row` encounters invalid data (e.g., a corrupted JSON blob), functions like `list_projects` skip the row and log a warning rather than failing the entire query. This prioritizes application availability and UI stability over strict data integrity.
-- **Timestamp Overwrites**: Because `discovered_at` is updated during the upsert (`discovered_at=excluded.discovered_at`), the application intentionally sacrifices accurate "first-seen" historical tracking for the sake of simpler `ON CONFLICT DO UPDATE` query logic.
-- **WAL Concurrency Limits**: While WAL mode allows concurrent readers alongside a writer, it is still bottlenecked by a single active writer. If a background write transaction takes longer than the 5000ms `busy_timeout` limit, the UI will receive a "database is locked" error.
-- **Write Churn**: The delete-and-reinsert pattern for the `project_languages` side table generates excess SQLite write churn and WAL size growth compared to granular row updates, trading off storage I/O performance for application-layer simplicity.
+- **Malformed Records**: Invalid JSON skips the row rather than failing the query, prioritizing UI stability.
+- **Timestamps**: Upserts overwrite `discovered_at`, sacrificing first-seen tracking for simpler queries.
+- **WAL Limits**: WAL is bottlenecked by a single writer; writes over 5000ms will lock the DB.
+- **Write Churn**: Delete-and-reinsert for languages increases WAL size for simpler logic.
+- **JSON Parsing**: Using JSON avoids migrations but incurs CPU cost on every read due to `serde_json` deserialization.
