@@ -345,6 +345,7 @@ export component PipelineWindow inherits Window {
                     Text { text: "Documentation Viewer"; font-size: 24px; color: #fff; font-weight: 700; }
                     Button {
                         text: "Load Readme";
+                        enabled: !root.working;
                         clicked => { root.load-document("README.md"); }
                     }
                     ScrollView {
