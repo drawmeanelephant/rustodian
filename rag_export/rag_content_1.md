@@ -1,50 +1,133 @@
 # RAG Export - Content (Part 1)
 
-### Path: ./LICENSE-MIT
+### Path: ./README.md
 ```
-MIT License
+<div align="center">
 
-Copyright (c) 2026 drawmeanelephant
+# 🏛️ Rustodian
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+### Department of Project Custodianship
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+*A personal project observatory that discovers, indexes, and monitors your software projects.*
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+[![CI](https://github.com/drawmeanelephant/rustodian/actions/workflows/ci.yml/badge.svg)](https://github.com/drawmeanelephant/rustodian/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
+
+</div>
+
+---
+
+## What is Rustodian?
+
+Rustodian scans your development directories, detects software projects (Rust, Python, Node.js, Go), and maintains a searchable index of their metadata. Think of it as `ls` for your entire project portfolio.
+
+```bash
+# Scan your projects directory
+rustodian scan ~/projects
+
+# List all discovered projects
+rustodian list
+
+# Filter by language
+rustodian list --language rust
+
+# Get detailed info about a project
+rustodian info my-awesome-project
+
+# Observatory status
+rustodian status
+
+# Remote Project Tracking
+rustodian remote add my-org/my-repo --preserve "config.json"
+rustodian remote list
+rustodian remote refresh --dest ~/projects
 
 ```
 
-### Path: ./LICENSE-APACHE
+## Features
+
+- 🔍 **Smart Discovery** — Walks directory trees respecting `.gitignore` rules
+- 🦀 **Language Detection** — Identifies Rust, Python, Node.js, and Go projects via manifest files
+- 🌿 **Git Integration** — Extracts branch, remote, dirty status, and last commit info
+- 💾 **Local Storage** — SQLite database for fast queries with zero configuration
+- 📊 **Multiple Outputs** — Table and JSON output formats
+- 🧹 **Digital Janitor** — Reclaims disk space by purging workspace cruft (e.g., `target/`, `node_modules/`). Supports dry-run for inspection and purge mode.
+- 🌐 **Remote Project Tracking** — Track and refresh repositories from remote sources like GitHub directly into your local workspace.
+
+
+## Desktop GUI
+
+Rustodian includes a desktop graphical interface built with **Slint**. It features a project browser, command runner, a document viewer (for rendering `README.md`, `CHANGELOG.md`, `TODO.md`), and dedicated tabs for Ingest, Export, Explorer, Logs, and Docs.
+
+To run the desktop app:
+
+```bash
+cargo run -p rustodian-desktop
 ```
-                              Apache License
-                        Version 2.0, January 2004
-                     http://www.apache.org/licenses/
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+## Installation
 
-    http://www.apache.org/licenses/LICENSE-2.0
+### From Source
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+```bash
+git clone https://github.com/drawmeanelephant/rustodian.git
+cd rustodian
+cargo install --path crates/rustodian-cli
+```
 
-Copyright (c) 2026 drawmeanelephant
+### Requirements
+
+- Rust 1.85+ (edition 2024)
+
+## Environment Variables
+
+Rustodian supports the following environment variables to configure its behavior:
+
+- `RUSTODIAN_DB`: Specifies the absolute path to the SQLite database file. If not set, it defaults to `~/.local/share/rustodian/rustodian.db` (or the equivalent data directory for your OS).
+- `RUSTODIAN_SCAN_ROOT`: Specifies the default root directory for the `scan` command if no path is provided.
+
+Add the following to your `~/.bashrc` or `~/.zshrc` for reproducible setups:
+
+```bash
+export RUSTODIAN_DB="$HOME/.config/rustodian/rustodian.db"
+export RUSTODIAN_SCAN_ROOT="$HOME/projects"
+```
+
+## Architecture
+
+Rustodian is built as a Cargo workspace with strict crate boundaries:
+
+| Crate | Purpose |
+|-------|--------|
+| `rustodian-types` | Shared data structures (zero behavior) |
+| `rustodian-core` | Domain traits and orchestration |
+| `rustodian-storage` | SQLite persistence |
+| `rustodian-scanner` | Filesystem project discovery |
+| `rustodian-git` | Git repository inspection |
+| `rustodian-cli` | CLI entry point |
+
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph and boundary rules.
+
+## Development
+
+```bash
+# Run all checks
+just ci
+
+# Or individually
+just fmt          # Format code
+just clippy       # Run lints
+just test         # Run tests
+just build        # Build all crates
+just run scan .   # Run the CLI
+cargo xtask export-rag # Export codebase to RAG-friendly markdown files
+```
+
+See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full guide.
+
+## License
+
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
 
 ```
 
@@ -238,271 +321,25 @@ A production-quality Cargo workspace scaffold with:
 
 ```
 
-### Path: ./docs/DEVELOPMENT.md
+### Path: ./LICENSE-APACHE
 ```
-# Development Guide
-
-## Prerequisites
-
-- **Rust**: 1.85+ (install via [rustup](https://rustup.rs))
-- **just**: Task runner (install via `cargo install just` or `brew install just`)
-
-## Quick Start
-
-```bash
-git clone https://github.com/drawmeanelephant/rustodian.git
-cd rustodian
-
-# Run all checks
-just ci
-
-# Build and run
-just run --help
-just run scan ~/projects
-```
-
-## Common Tasks
-
-| Command | Description |
-|---------|------------|
-| `just fmt` | Format all code |
-| `just clippy` | Run clippy lints |
-| `just test` | Run all tests |
-| `just test-verbose` | Run tests with output |
-| `just build` | Build all crates |
-| `just doc-open` | Build and open docs |
-| `just ci` | Run full CI locally |
-| `just run <args>` | Run the CLI |
-
-## Adding a New Language Detector
-
-1. Open `crates/rustodian-scanner/src/detection.rs`
-2. Add a new `detect_<language>` function following the existing pattern
-3. Register it in the `detect_languages` function
-4. Add the language variant to `Language` enum in `crates/rustodian-types/src/language.rs`
-5. Add tests
-
-## Adding a New CLI Command
-
-1. Create `crates/rustodian-cli/src/commands/<name>.rs`
-2. Add to `crates/rustodian-cli/src/commands/mod.rs`
-3. Add the subcommand variant to `Commands` enum in `main.rs`
-4. Wire up in the match block
-
-## Adding a New Crate
-
-1. Create `crates/rustodian-<name>/`
-2. Add `Cargo.toml` using workspace inheritance
-3. The workspace auto-discovers via `members = ["crates/*"]`
-4. Update `docs/ARCHITECTURE.md` with new boundary rules
-
-## Conventions
-
-- **Commits**: Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, etc.)
-- **Errors**: Use `thiserror` in libraries, `anyhow` in the CLI binary
-- **Logging**: Use `tracing` macros (`info!`, `debug!`, `warn!`)
-- **Testing**: Unit tests in the same file, integration tests in `tests/`
-
-```
-
-### Path: ./docs/TESTING.md
-```
-# Testing Strategy
-
-## Unit Tests
-
-Each crate has inline `#[cfg(test)]` modules. Run with:
-
-```bash
-cargo test --workspace
-```
-
-## Integration Tests
-
-CLI integration tests use `assert_cmd` and `predicates`:
-
-```bash
-cargo test -p rustodian-cli
-```
-
-## Test Fixtures
-
-Tests that need project directories use `tempfile::TempDir` to create
-isolated fixture directories with specific marker files.
-
-## Snapshot Testing
-
-`insta` is available for snapshot testing of complex outputs:
-
-```bash
-# Run tests and review snapshots
-cargo insta test --workspace
-cargo insta review
-```
-
-## Coverage
-
-```bash
-cargo xtask coverage
-# Or directly:
-cargo tarpaulin --workspace --out html
-```
-
-## What to Test
-
-| Crate | Focus |
-|-------|-------|
-| types | Serialization roundtrips |
-| core | Custodian orchestration with mocks |
-| storage | Migration idempotency, CRUD operations |
-| scanner | Language detection, directory walking |
-| git | Git info extraction from fixture repos |
-| cli | End-to-end command testing |
-
-```
-
-### Path: ./docs/features/BOOTSTRAP_ISOLATION.md
-```
-# Environment Isolation in Rustodian
-
-When Rustodian bootstraps and verifies projects, it isolates operations to prevent host system pollution, ensuring reproducible environments across codebases.
-
-## Language Command Mapping
-
-| Language | Isolation Mechanism | Setup Command | Verify Command |
-| --- | --- | --- | --- |
-| Rust | No isolation (native `target/`) | `cargo build` | `cargo test` |
-| Node | Local `node_modules` directory | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
-| Go | `GOPATH` env var override to `.gopath` | `go mod download` | `go test ./...` |
-| Python | Virtual Env (`.venv`) directory | Unix: `.venv/bin/pip install -r requirements.txt`<br>and/or `.venv/bin/pip install .`<br>Win: `.venv\Scripts\pip install -r requirements.txt`<br>and/or `.venv\Scripts\pip install .` | Unix: `.venv/bin/pytest -v`<br>(fallback: `.venv/bin/python -m unittest discover`)<br>Win: `.venv\Scripts\pytest -v`<br>(fallback: `.venv\Scripts\python -m unittest discover`) |
-
-## Isolation Strategies
-
-**Rust:** Builds natively in the `target/` directory with no additional isolation.
-
-**Node.js:** Dependencies are localized in `node_modules`. Rustodian detects lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`) to select the package manager, with `npm` as the fallback.
-
-**Go:** Rustodian overrides the global `GOPATH` environment variable to a project-local `.gopath` directory, protecting the global module cache.
-
-**Python:** Rustodian uses a Virtual Environment (`.venv`):
-1. Attempts creation via `python3 -m venv .venv`, falling back to `python -m venv .venv`.
-2. Installs dependencies sequentially: runs `pip install -r requirements.txt` if `requirements.txt` exists; runs `pip install .` if `pyproject.toml` or `setup.py` exists (using `.venv/bin/pip` on Unix or `.venv\Scripts\pip` on Windows).
-3. Verifies via local `pytest -v` if the executable exists, falling back to `python -m unittest discover` (using `.venv/bin/` on Unix or `.venv\Scripts\` on Windows).
-
-## Example: Mixed-Language Monorepo
-
-```text
-my-monorepo/
-├── frontend/ (Node)
-│   ├── pnpm-lock.yaml
-│   └── package.json
-└── backend/ (Python)
-    ├── pyproject.toml
-    └── main.py
-```
-
-When Rustodian scans this directory:
-1. **Frontend:** It detects `pnpm-lock.yaml`, isolating dependencies in `frontend/node_modules/` via `pnpm install`, and verifies using `pnpm test`.
-2. **Backend:** It creates `backend/.venv`. On Unix, it runs `backend/.venv/bin/pip install .` and verifies with `backend/.venv/bin/pytest -v` (or `unittest`). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
-
-Neither project affects the host system's global state or each other.
-
-```
-
-### Path: ./docs/features/REMOTE_TRACKING.md
-```
-# Remote Repository Tracking
-
-This document outlines the remote repository tracking features implemented in the `rustodian-remote` crate, specifically focusing on `GithubDownloader` in `crates/rustodian-remote/src/downloader.rs`.
-
-## Pull Requests
-The `PullRequestFetcher` trait defines the interface for fetching open PRs. `GithubDownloader` implements this trait, fetching PR metadata (number, title, author, branch, url, update time, and draft status) from the GitHub API.
-
-In the desktop UI (`rustodian-desktop`), the Slint UI interacts with the async `PullRequestFetcher` trait via background thread messaging. When the UI dispatches a message over the worker channel, the background worker creates a short-lived, local `Tokio` runtime to bridge the synchronous event loop and the async PR fetching logic without blocking the main thread.
-
-## GithubDownloader Flow
-When downloading an archive, `GithubDownloader` requests the `main` branch tarball (`/archive/refs/heads/main.tar.gz`). If it receives a `404 Not Found`, it automatically falls back to `master` (`/archive/refs/heads/master.tar.gz`), ensuring compatibility with both new and legacy branch naming conventions.
-
-## Zip Slip and Path Traversal Protections
-Extracting untrusted archives carries "Zip Slip" risks, where malicious entries use path traversal (`../`) or symlinks to overwrite files outside the intended directory.
-
-The downloader implements strict protections:
-1. **Component Verification:** Extraction is rejected if any path component is not a normal file/directory or the current directory (`.`). `..` components trigger an immediate security error.
-2. **Prefix Stripping:** Top-level archive directories are discarded via component iterator manipulation (`strip_prefix`) to prevent unnecessary nesting.
-3. **Canonicalization Checks:** It uses `canonicalize` on the target directory parent of each entry, strictly validating that the resolved extraction path begins exactly with the intended extraction root.
-4. **Symlink Mitigation:** If an archive contains a symlink pointing outside the root and a subsequent entry attempts to write to it, the canonicalization check intercepts the operation and aborts extraction, preventing arbitrary file overwrites.
-
-## Preserve Patterns
-To prevent overwriting local configurations or files when refreshing an archive, the downloader supports a `preserve_patterns` glob mechanism.
-
-During extraction, each archive entry's stripped path is matched against a compiled `globset`. If an entry matches a preserve pattern (e.g., `config.json`, `*.local`), it is safely skipped, leaving the local file intact.
-
-## Rate Limit Handling
-When fetching PRs, `GithubDownloader` monitors the HTTP response. A `403 Forbidden` with an `X-RateLimit-Remaining` header of `"0"` is mapped to `CoreError::RateLimitExceeded`. This enables upper layers to handle rate limits gracefully.
-
-## Example CLI Usage
-You can use the `rustodian` CLI to manage remote repositories. Here is a realistic end-to-end example: adding a project with a preserve pattern, listing tracked projects, and refreshing the repository.
-
-```bash
-$ rustodian remote add octocat/Hello-World --preserve "config.json"
-Added remote project: octocat/Hello-World
-
-$ rustodian remote list
-+---------------------+-------------------+
-| Repo Slug           | Preserve Patterns |
-+=========================================+
-| octocat/Hello-World | config.json       |
-+---------------------+-------------------+
-
-$ rustodian remote refresh --dest ./my_remotes
-Refreshing octocat/Hello-World...
-Successfully refreshed octocat/Hello-World
-Scanning project octocat/Hello-World...
-Scan completed. Found 1 projects.
-```
-
-```
-
-### Path: ./docs/features/SCANNER_DETECTION.md
-```
-# Scanner and Detection
-
-## Directory Traversal (`ignore` vs `walkdir`)
-
-Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` because `ignore` automatically respects `.gitignore` and `.ignore` rules. Without this, walking a directory would waste vast amounts of I/O stat calls descending into massive build artifact folders. For example, skipping a `node_modules/` or `target/` directory automatically prevents traversing tens of thousands of unnecessary files. This ensures rapid discovery focused solely on tracked source code, avoiding severe performance bottlenecks.
-
-## Performance: `ScanConfig.max_depth`
-
-The `ScanConfig.max_depth` configuration limits recursion depth. Scanning deep monorepos with hundreds of nested directories can be prohibitively slow. Enforcing a maximum depth restricts unbounded scan times while capturing typical project structures. A depth of 0 halts traversal entirely, returning empty results.
-
-## Language Detection Pattern
-
-Language detection uses pure functions in `detect_languages` (e.g., `detect_rust`). Each directory is examined for specific marker files. These detectors are evaluated independently. If a directory contains competing manifests, such as both `Cargo.toml` and `package.json`, it is recognized as a polyglot project. This yields independent, High-confidence detections for both Rust and Node, without reducing the confidence of either.
-
-### Markers and Confidence Table
-
-| Language | Marker File(s) | Confidence Rules |
-|----------|----------------|------------------|
-| **Rust** | `Cargo.toml`, `Cargo.lock` | **High:** `Cargo.toml` exists. **Medium:** Only `Cargo.lock` exists. |
-| **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only lockfile or `requirements.txt` config exists. |
-| **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Any marker matched (always High, even with just lockfiles). |
-| **Go**   | `go.mod`, `go.sum` | **High:** Any marker matched (always High, even with just lockfiles). |
-| **Ruby** | `Gemfile`, `*.gemspec`, `Gemfile.lock` | **High:** `Gemfile` or `*.gemspec` exists. **Medium:** Only `Gemfile.lock` exists. |
-| **Zig**  | `build.zig`, `build.zig.zon` | **High:** `build.zig` exists. **Medium:** Only `build.zig.zon` exists. |
-
-## Detection Confidence Levels
-
-The `DetectionConfidence` enum categorizes evidence strength:
-
-- **High:** A definitive manifest file is present (e.g., `Cargo.toml`, `package.json`, `go.mod`), strongly indicating a project root. Note that Node and Go always yield High confidence, even if only lockfiles are found.
-- **Medium:** Supporting evidence exists, but is not definitive. For instance, a `Cargo.lock` without a `Cargo.toml` might indicate a sub-crate, and a standalone `requirements.txt` might be a loosely tracked dependency list.
-- **Low:** Weak signals (e.g., file extensions). Currently unused, but designed for future heuristics when only source files exist.
-
-## Self-Healing Garbage Collection
-
-During every scan (`Custodian::scan`), Rustodian performs a self-healing garbage collection pass. It checks all tracked projects; if a project's filesystem path no longer exists, it purges the project from the database.
-
-Crucially, the `project_logs` table schema (which stores audit history like janitor actions) defines a foreign key `REFERENCES projects(id) ON DELETE CASCADE`. When the self-healing process deletes a purged project's row from the `projects` table, SQLite automatically cascade-deletes all associated audit logs. This guarantees that no orphaned log records remain, allowing the database to self-correct effortlessly without manual intervention.
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Copyright (c) 2026 drawmeanelephant
 
 ```
 
@@ -598,6 +435,60 @@ Instead of strict columns, `metadata_json` stores a blob structured as: `{"meta"
 
 ```
 
+### Path: ./docs/features/REMOTE_TRACKING.md
+```
+# Remote Repository Tracking
+
+This document outlines the remote repository tracking features implemented in the `rustodian-remote` crate, specifically focusing on `GithubDownloader` in `crates/rustodian-remote/src/downloader.rs`.
+
+## Pull Requests
+The `PullRequestFetcher` trait defines the interface for fetching open PRs. `GithubDownloader` implements this trait, fetching PR metadata (number, title, author, branch, url, update time, and draft status) from the GitHub API.
+
+In the desktop UI (`rustodian-desktop`), the Slint UI interacts with the async `PullRequestFetcher` trait via background thread messaging. When the UI dispatches a message over the worker channel, the background worker creates a short-lived, local `Tokio` runtime to bridge the synchronous event loop and the async PR fetching logic without blocking the main thread.
+
+## GithubDownloader Flow
+When downloading an archive, `GithubDownloader` requests the `main` branch tarball (`/archive/refs/heads/main.tar.gz`). If it receives a `404 Not Found`, it automatically falls back to `master` (`/archive/refs/heads/master.tar.gz`), ensuring compatibility with both new and legacy branch naming conventions.
+
+## Zip Slip and Path Traversal Protections
+Extracting untrusted archives carries "Zip Slip" risks, where malicious entries use path traversal (`../`) or symlinks to overwrite files outside the intended directory.
+
+The downloader implements strict protections:
+1. **Component Verification:** Extraction is rejected if any path component is not a normal file/directory or the current directory (`.`). `..` components trigger an immediate security error.
+2. **Prefix Stripping:** Top-level archive directories are discarded via component iterator manipulation (`strip_prefix`) to prevent unnecessary nesting.
+3. **Canonicalization Checks:** It uses `canonicalize` on the target directory parent of each entry, strictly validating that the resolved extraction path begins exactly with the intended extraction root.
+4. **Symlink Mitigation:** If an archive contains a symlink pointing outside the root and a subsequent entry attempts to write to it, the canonicalization check intercepts the operation and aborts extraction, preventing arbitrary file overwrites.
+
+## Preserve Patterns
+To prevent overwriting local configurations or files when refreshing an archive, the downloader supports a `preserve_patterns` glob mechanism.
+
+During extraction, each archive entry's stripped path is matched against a compiled `globset`. If an entry matches a preserve pattern (e.g., `config.json`, `*.local`), it is safely skipped, leaving the local file intact.
+
+## Rate Limit Handling
+When fetching PRs, `GithubDownloader` monitors the HTTP response. A `403 Forbidden` with an `X-RateLimit-Remaining` header of `"0"` is mapped to `CoreError::RateLimitExceeded`. This enables upper layers to handle rate limits gracefully.
+
+## Example CLI Usage
+You can use the `rustodian` CLI to manage remote repositories. Here is a realistic end-to-end example: adding a project with a preserve pattern, listing tracked projects, and refreshing the repository.
+
+```bash
+$ rustodian remote add octocat/Hello-World --preserve "config.json"
+Added remote project: octocat/Hello-World
+
+$ rustodian remote list
++---------------------+-------------------+
+| Repo Slug           | Preserve Patterns |
++=========================================+
+| octocat/Hello-World | config.json       |
++---------------------+-------------------+
+
+$ rustodian remote refresh --dest ./my_remotes
+Refreshing octocat/Hello-World...
+Successfully refreshed octocat/Hello-World
+Scanning project octocat/Hello-World...
+Scan completed. Found 1 projects.
+```
+
+```
+
 ### Path: ./docs/features/DIGITAL_JANITOR.md
 ```
 # Digital Janitor
@@ -656,6 +547,153 @@ $ rustodian janitor example-rust-app --purge
 ## Gotchas
 
 * **Permission Denied Errors:** If the Janitor encounters a permissions error and fails to remove a directory during a `--purge` operation (via `fs::remove_dir_all`), it warns via standard logging. However, it currently **still** includes the full directory size in the reported `bytes_reclaimed` and the database audit log.
+
+```
+
+### Path: ./docs/features/SCANNER_DETECTION.md
+```
+# Scanner and Detection
+
+## Directory Traversal (`ignore` vs `walkdir`)
+
+Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` because `ignore` automatically respects `.gitignore` and `.ignore` rules. Without this, walking a directory would waste vast amounts of I/O stat calls descending into massive build artifact folders. For example, skipping a `node_modules/` or `target/` directory automatically prevents traversing tens of thousands of unnecessary files. This ensures rapid discovery focused solely on tracked source code, avoiding severe performance bottlenecks.
+
+## Performance: `ScanConfig.max_depth`
+
+The `ScanConfig.max_depth` configuration limits recursion depth. Scanning deep monorepos with hundreds of nested directories can be prohibitively slow. Enforcing a maximum depth restricts unbounded scan times while capturing typical project structures. A depth of 0 halts traversal entirely, returning empty results.
+
+## Language Detection Pattern
+
+Language detection uses pure functions in `detect_languages` (e.g., `detect_rust`). Each directory is examined for specific marker files. These detectors are evaluated independently. If a directory contains competing manifests, such as both `Cargo.toml` and `package.json`, it is recognized as a polyglot project. This yields independent, High-confidence detections for both Rust and Node, without reducing the confidence of either.
+
+### Markers and Confidence Table
+
+| Language | Marker File(s) | Confidence Rules |
+|----------|----------------|------------------|
+| **Rust** | `Cargo.toml`, `Cargo.lock` | **High:** `Cargo.toml` exists. **Medium:** Only `Cargo.lock` exists. |
+| **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only lockfile or `requirements.txt` config exists. |
+| **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Any marker matched (always High, even with just lockfiles). |
+| **Go**   | `go.mod`, `go.sum` | **High:** Any marker matched (always High, even with just lockfiles). |
+| **Ruby** | `Gemfile`, `*.gemspec`, `Gemfile.lock` | **High:** `Gemfile` or `*.gemspec` exists. **Medium:** Only `Gemfile.lock` exists. |
+| **Zig**  | `build.zig`, `build.zig.zon` | **High:** `build.zig` exists. **Medium:** Only `build.zig.zon` exists. |
+
+## Detection Confidence Levels
+
+The `DetectionConfidence` enum categorizes evidence strength:
+
+- **High:** A definitive manifest file is present (e.g., `Cargo.toml`, `package.json`, `go.mod`), strongly indicating a project root. Note that Node and Go always yield High confidence, even if only lockfiles are found.
+- **Medium:** Supporting evidence exists, but is not definitive. For instance, a `Cargo.lock` without a `Cargo.toml` might indicate a sub-crate, and a standalone `requirements.txt` might be a loosely tracked dependency list.
+- **Low:** Weak signals (e.g., file extensions). Currently unused, but designed for future heuristics when only source files exist.
+
+## Self-Healing Garbage Collection
+
+During every scan (`Custodian::scan`), Rustodian performs a self-healing garbage collection pass. It checks all tracked projects; if a project's filesystem path no longer exists, it purges the project from the database.
+
+Crucially, the `project_logs` table schema (which stores audit history like janitor actions) defines a foreign key `REFERENCES projects(id) ON DELETE CASCADE`. When the self-healing process deletes a purged project's row from the `projects` table, SQLite automatically cascade-deletes all associated audit logs. This guarantees that no orphaned log records remain, allowing the database to self-correct effortlessly without manual intervention.
+
+```
+
+### Path: ./docs/features/BOOTSTRAP_ISOLATION.md
+```
+# Environment Isolation in Rustodian
+
+When Rustodian bootstraps and verifies projects, it isolates operations to prevent host system pollution, ensuring reproducible environments across codebases.
+
+## Language Command Mapping
+
+| Language | Isolation Mechanism | Setup Command | Verify Command |
+| --- | --- | --- | --- |
+| Rust | No isolation (native `target/`) | `cargo build` | `cargo test` |
+| Node | Local `node_modules` directory | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
+| Go | `GOPATH` env var override to `.gopath` | `go mod download` | `go test ./...` |
+| Python | Virtual Env (`.venv`) directory | Unix: `.venv/bin/pip install -r requirements.txt`<br>and/or `.venv/bin/pip install .`<br>Win: `.venv\Scripts\pip install -r requirements.txt`<br>and/or `.venv\Scripts\pip install .` | Unix: `.venv/bin/pytest -v`<br>(fallback: `.venv/bin/python -m unittest discover`)<br>Win: `.venv\Scripts\pytest -v`<br>(fallback: `.venv\Scripts\python -m unittest discover`) |
+
+## Isolation Strategies
+
+**Rust:** Builds natively in the `target/` directory with no additional isolation.
+
+**Node.js:** Dependencies are localized in `node_modules`. Rustodian detects lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`) to select the package manager, with `npm` as the fallback.
+
+**Go:** Rustodian overrides the global `GOPATH` environment variable to a project-local `.gopath` directory, protecting the global module cache.
+
+**Python:** Rustodian uses a Virtual Environment (`.venv`):
+1. Attempts creation via `python3 -m venv .venv`, falling back to `python -m venv .venv`.
+2. Installs dependencies sequentially: runs `pip install -r requirements.txt` if `requirements.txt` exists; runs `pip install .` if `pyproject.toml` or `setup.py` exists (using `.venv/bin/pip` on Unix or `.venv\Scripts\pip` on Windows).
+3. Verifies via local `pytest -v` if the executable exists, falling back to `python -m unittest discover` (using `.venv/bin/` on Unix or `.venv\Scripts\` on Windows).
+
+## Example: Mixed-Language Monorepo
+
+```text
+my-monorepo/
+├── frontend/ (Node)
+│   ├── pnpm-lock.yaml
+│   └── package.json
+└── backend/ (Python)
+    ├── pyproject.toml
+    └── main.py
+```
+
+When Rustodian scans this directory:
+1. **Frontend:** It detects `pnpm-lock.yaml`, isolating dependencies in `frontend/node_modules/` via `pnpm install`, and verifies using `pnpm test`.
+2. **Backend:** It creates `backend/.venv`. On Unix, it runs `backend/.venv/bin/pip install .` and verifies with `backend/.venv/bin/pytest -v` (or `unittest`). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
+
+Neither project affects the host system's global state or each other.
+
+```
+
+### Path: ./docs/TESTING.md
+```
+# Testing Strategy
+
+## Unit Tests
+
+Each crate has inline `#[cfg(test)]` modules. Run with:
+
+```bash
+cargo test --workspace
+```
+
+## Integration Tests
+
+CLI integration tests use `assert_cmd` and `predicates`:
+
+```bash
+cargo test -p rustodian-cli
+```
+
+## Test Fixtures
+
+Tests that need project directories use `tempfile::TempDir` to create
+isolated fixture directories with specific marker files.
+
+## Snapshot Testing
+
+`insta` is available for snapshot testing of complex outputs:
+
+```bash
+# Run tests and review snapshots
+cargo insta test --workspace
+cargo insta review
+```
+
+## Coverage
+
+```bash
+cargo xtask coverage
+# Or directly:
+cargo tarpaulin --workspace --out html
+```
+
+## What to Test
+
+| Crate | Focus |
+|-------|-------|
+| types | Serialization roundtrips |
+| core | Custodian orchestration with mocks |
+| storage | Migration idempotency, CRUD operations |
+| scanner | Language detection, directory walking |
+| git | Git info extraction from fixture repos |
+| cli | End-to-end command testing |
 
 ```
 
@@ -768,60 +806,96 @@ The desktop application (`rustodian-desktop`) includes a project browser, comman
 
 ```
 
-### Path: ./.github/ISSUE_TEMPLATE/feature_request.md
+### Path: ./docs/DEVELOPMENT.md
 ```
----
-name: Feature Request
-about: Suggest a feature for Rustodian
-title: '[FEATURE] '
-labels: enhancement
-assignees: ''
----
+# Development Guide
 
-## Problem
-What problem does this solve?
+## Prerequisites
 
-## Proposed Solution
-How should it work?
+- **Rust**: 1.85+ (install via [rustup](https://rustup.rs))
+- **just**: Task runner (install via `cargo install just` or `brew install just`)
 
-## Alternatives Considered
-Any other approaches you considered.
+## Quick Start
 
-## Additional Context
-Any other context or references.
+```bash
+git clone https://github.com/drawmeanelephant/rustodian.git
+cd rustodian
+
+# Run all checks
+just ci
+
+# Build and run
+just run --help
+just run scan ~/projects
+```
+
+## Common Tasks
+
+| Command | Description |
+|---------|------------|
+| `just fmt` | Format all code |
+| `just clippy` | Run clippy lints |
+| `just test` | Run all tests |
+| `just test-verbose` | Run tests with output |
+| `just build` | Build all crates |
+| `just doc-open` | Build and open docs |
+| `just ci` | Run full CI locally |
+| `just run <args>` | Run the CLI |
+
+## Adding a New Language Detector
+
+1. Open `crates/rustodian-scanner/src/detection.rs`
+2. Add a new `detect_<language>` function following the existing pattern
+3. Register it in the `detect_languages` function
+4. Add the language variant to `Language` enum in `crates/rustodian-types/src/language.rs`
+5. Add tests
+
+## Adding a New CLI Command
+
+1. Create `crates/rustodian-cli/src/commands/<name>.rs`
+2. Add to `crates/rustodian-cli/src/commands/mod.rs`
+3. Add the subcommand variant to `Commands` enum in `main.rs`
+4. Wire up in the match block
+
+## Adding a New Crate
+
+1. Create `crates/rustodian-<name>/`
+2. Add `Cargo.toml` using workspace inheritance
+3. The workspace auto-discovers via `members = ["crates/*"]`
+4. Update `docs/ARCHITECTURE.md` with new boundary rules
+
+## Conventions
+
+- **Commits**: Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, etc.)
+- **Errors**: Use `thiserror` in libraries, `anyhow` in the CLI binary
+- **Logging**: Use `tracing` macros (`info!`, `debug!`, `warn!`)
+- **Testing**: Unit tests in the same file, integration tests in `tests/`
 
 ```
 
-### Path: ./.github/ISSUE_TEMPLATE/bug_report.md
+### Path: ./LICENSE-MIT
 ```
----
-name: Bug Report
-about: Report a bug in Rustodian
-title: '[BUG] '
-labels: bug
-assignees: ''
----
+MIT License
 
-## Description
-A clear description of the bug.
+Copyright (c) 2026 drawmeanelephant
 
-## Steps to Reproduce
-1. Run `rustodian ...`
-2. ...
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-## Expected Behavior
-What you expected to happen.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-## Actual Behavior
-What actually happened.
-
-## Environment
-- OS:
-- Rustodian version:
-- Rust version:
-
-## Additional Context
-Any other context, logs, or screenshots.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ```
 
@@ -854,133 +928,60 @@ Closes #
 
 ```
 
-### Path: ./README.md
+### Path: ./.github/ISSUE_TEMPLATE/bug_report.md
 ```
-<div align="center">
-
-# 🏛️ Rustodian
-
-### Department of Project Custodianship
-
-*A personal project observatory that discovers, indexes, and monitors your software projects.*
-
-[![CI](https://github.com/drawmeanelephant/rustodian/actions/workflows/ci.yml/badge.svg)](https://github.com/drawmeanelephant/rustodian/actions/workflows/ci.yml)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
-
-</div>
-
+---
+name: Bug Report
+about: Report a bug in Rustodian
+title: '[BUG] '
+labels: bug
+assignees: ''
 ---
 
-## What is Rustodian?
+## Description
+A clear description of the bug.
 
-Rustodian scans your development directories, detects software projects (Rust, Python, Node.js, Go), and maintains a searchable index of their metadata. Think of it as `ls` for your entire project portfolio.
+## Steps to Reproduce
+1. Run `rustodian ...`
+2. ...
 
-```bash
-# Scan your projects directory
-rustodian scan ~/projects
+## Expected Behavior
+What you expected to happen.
 
-# List all discovered projects
-rustodian list
+## Actual Behavior
+What actually happened.
 
-# Filter by language
-rustodian list --language rust
+## Environment
+- OS: 
+- Rustodian version: 
+- Rust version: 
 
-# Get detailed info about a project
-rustodian info my-awesome-project
-
-# Observatory status
-rustodian status
-
-# Remote Project Tracking
-rustodian remote add my-org/my-repo --preserve "config.json"
-rustodian remote list
-rustodian remote refresh --dest ~/projects
+## Additional Context
+Any other context, logs, or screenshots.
 
 ```
 
-## Features
+### Path: ./.github/ISSUE_TEMPLATE/feature_request.md
+```
+---
+name: Feature Request
+about: Suggest a feature for Rustodian
+title: '[FEATURE] '
+labels: enhancement
+assignees: ''
+---
 
-- 🔍 **Smart Discovery** — Walks directory trees respecting `.gitignore` rules
-- 🦀 **Language Detection** — Identifies Rust, Python, Node.js, and Go projects via manifest files
-- 🌿 **Git Integration** — Extracts branch, remote, dirty status, and last commit info
-- 💾 **Local Storage** — SQLite database for fast queries with zero configuration
-- 📊 **Multiple Outputs** — Table and JSON output formats
-- 🧹 **Digital Janitor** — Reclaims disk space by purging workspace cruft (e.g., `target/`, `node_modules/`). Supports dry-run for inspection and purge mode.
-- 🌐 **Remote Project Tracking** — Track and refresh repositories from remote sources like GitHub directly into your local workspace.
+## Problem
+What problem does this solve?
 
+## Proposed Solution
+How should it work?
 
-## Desktop GUI
+## Alternatives Considered
+Any other approaches you considered.
 
-Rustodian includes a desktop graphical interface built with **Slint**. It features a project browser, command runner, a document viewer (for rendering `README.md`, `CHANGELOG.md`, `TODO.md`), and dedicated tabs for Ingest, Export, Explorer, Logs, and Docs.
+## Additional Context
+Any other context or references.
 
-To run the desktop app:
-
-```bash
-cargo run -p rustodian-desktop
 ```
 
-## Installation
-
-### From Source
-
-```bash
-git clone https://github.com/drawmeanelephant/rustodian.git
-cd rustodian
-cargo install --path crates/rustodian-cli
-```
-
-### Requirements
-
-- Rust 1.85+ (edition 2024)
-
-## Environment Variables
-
-Rustodian supports the following environment variables to configure its behavior:
-
-- `RUSTODIAN_DB`: Specifies the absolute path to the SQLite database file. If not set, it defaults to `~/.local/share/rustodian/rustodian.db` (or the equivalent data directory for your OS).
-- `RUSTODIAN_SCAN_ROOT`: Specifies the default root directory for the `scan` command if no path is provided.
-
-Add the following to your `~/.bashrc` or `~/.zshrc` for reproducible setups:
-
-```bash
-export RUSTODIAN_DB="$HOME/.config/rustodian/rustodian.db"
-export RUSTODIAN_SCAN_ROOT="$HOME/projects"
-```
-
-## Architecture
-
-Rustodian is built as a Cargo workspace with strict crate boundaries:
-
-| Crate | Purpose |
-|-------|--------|
-| `rustodian-types` | Shared data structures (zero behavior) |
-| `rustodian-core` | Domain traits and orchestration |
-| `rustodian-storage` | SQLite persistence |
-| `rustodian-scanner` | Filesystem project discovery |
-| `rustodian-git` | Git repository inspection |
-| `rustodian-cli` | CLI entry point |
-
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full dependency graph and boundary rules.
-
-## Development
-
-```bash
-# Run all checks
-just ci
-
-# Or individually
-just fmt          # Format code
-just clippy       # Run lints
-just test         # Run tests
-just build        # Build all crates
-just run scan .   # Run the CLI
-cargo xtask export-rag # Export codebase to RAG-friendly markdown files
-```
-
-See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full guide.
-
-## License
-
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
-
-```

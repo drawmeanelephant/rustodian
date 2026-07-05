@@ -1,48 +1,5 @@
 # RAG Export - Config (Part 1)
 
-### Path: ./.gitignore
-```
-# Rust build artifacts
-/target/
-**/*.rs.bk
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Environment
-.env
-.env.local
-
-# Database (local dev)
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Coverage
-lcov.info
-tarpaulin-report.html
-
-# OS
-Thumbs.db
-# rag_export/
-*.log
-
-# Generated log files
-clippy.log
-test.log
-
-# Working/scratch docs
-gemini.md
-rag_*.md
-
-```
-
 ### Path: ./deny.toml
 ```
 [advisories]
@@ -88,70 +45,10 @@ allow-git = []
 
 ```
 
-### Path: ./justfile
+### Path: ./clippy.toml
 ```
-# Rustodian Justfile — Developer convenience commands
-# Usage: just <recipe>
-
-set dotenv-load
-
-# Default: run all checks
-default: fmt clippy test
-
-# Format all code
-fmt:
-    cargo fmt --all
-
-# Check formatting (CI mode)
-fmt-check:
-    cargo fmt --all -- --check
-
-# Run clippy lints
-clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
-
-# Run all tests
-test:
-    cargo test --workspace
-
-# Run tests with output
-test-verbose:
-    cargo test --workspace -- --nocapture
-
-# Build all crates
-build:
-    cargo build --workspace
-
-# Build in release mode
-build-release:
-    cargo build --workspace --release
-
-# Run the CLI
-run *ARGS:
-    cargo run -p rustodian-cli -- {{ARGS}}
-
-# Check documentation builds
-doc:
-    RUSTDOCFLAGS="-Dwarnings" cargo doc --workspace --no-deps
-
-# Open documentation in browser
-doc-open:
-    cargo doc --workspace --no-deps --open
-
-# Run cargo deny checks
-deny:
-    cargo deny check
-
-# Run all CI checks locally
-ci: fmt-check clippy test doc deny
-
-# Clean build artifacts
-clean:
-    cargo clean
-
-# Run xtask commands
-xtask *ARGS:
-    cargo run -p xtask -- {{ARGS}}
+too-many-arguments-threshold = 8
+type-complexity-threshold = 350
 
 ```
 
@@ -223,13 +120,6 @@ missing_panics_doc = "allow"
 
 ```
 
-### Path: ./clippy.toml
-```
-too-many-arguments-threshold = 8
-type-complexity-threshold = 350
-
-```
-
 ### Path: ./xtask/Cargo.toml
 ```
 [package]
@@ -248,6 +138,89 @@ rustodian-git.workspace = true
 
 # xtask intentionally does not use workspace inheritance
 # to keep it self-contained
+
+```
+
+### Path: ./crates/rustodian-types/Cargo.toml
+```
+[package]
+name = "rustodian-types"
+description = "Shared types and data structures for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
+
+```
+
+### Path: ./crates/rustodian-remote/Cargo.toml
+```
+[package]
+name = "rustodian-remote"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+rustodian-types = { workspace = true }
+rustodian-core = { workspace = true }
+tokio = { version = "1.52", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+flate2 = "1.0"
+tar = "0.4"
+globset = "0.4"
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = "0.1"
+serde = { workspace = true, features = ["derive"] }
+chrono.workspace = true
+
+[dev-dependencies]
+mockito = "1.7.2"
+tempfile.workspace = true
+
+```
+
+### Path: ./crates/rustodian-storage/Cargo.toml
+```
+[package]
+name = "rustodian-storage"
+description = "SQLite storage backend for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustodian-types.workspace = true
+rustodian-core.workspace = true
+rusqlite.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
 
 ```
 
@@ -317,118 +290,6 @@ chrono.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-tempfile.workspace = true
-
-[lints]
-workspace = true
-
-```
-
-### Path: ./crates/rustodian-types/Cargo.toml
-```
-[package]
-name = "rustodian-types"
-description = "Shared types and data structures for Rustodian"
-edition.workspace = true
-version.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
-serde.workspace = true
-serde_json.workspace = true
-chrono.workspace = true
-uuid.workspace = true
-
-[lints]
-workspace = true
-
-```
-
-### Path: ./crates/rustodian-scanner/Cargo.toml
-```
-[package]
-name = "rustodian-scanner"
-description = "Filesystem project discovery for Rustodian"
-edition.workspace = true
-version.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
-rustodian-types.workspace = true
-rustodian-core.workspace = true
-ignore.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-toml = "1.1.2"
-serde_json.workspace = true
-globset = "0.4.18"
-
-[dev-dependencies]
-tempfile.workspace = true
-
-[lints]
-workspace = true
-
-```
-
-### Path: ./crates/rustodian-remote/Cargo.toml
-```
-[package]
-name = "rustodian-remote"
-version = "0.1.0"
-edition = "2024"
-license.workspace = true
-
-[dependencies]
-rustodian-types = { workspace = true }
-rustodian-core = { workspace = true }
-tokio = { version = "1.52", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-flate2 = "1.0"
-tar = "0.4"
-globset = "0.4"
-tracing = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-async-trait = "0.1"
-serde = { workspace = true, features = ["derive"] }
-chrono.workspace = true
-
-[dev-dependencies]
-mockito = "1.7.2"
-tempfile.workspace = true
-
-```
-
-### Path: ./crates/rustodian-storage/Cargo.toml
-```
-[package]
-name = "rustodian-storage"
-description = "SQLite storage backend for Rustodian"
-edition.workspace = true
-version.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
-rustodian-types.workspace = true
-rustodian-core.workspace = true
-rusqlite.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-chrono.workspace = true
-uuid.workspace = true
-r2d2.workspace = true
-r2d2_sqlite.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true
 
 [lints]
@@ -509,6 +370,184 @@ workspace = true
 
 ```
 
+### Path: ./crates/rustodian-scanner/Cargo.toml
+```
+[package]
+name = "rustodian-scanner"
+description = "Filesystem project discovery for Rustodian"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustodian-types.workspace = true
+rustodian-core.workspace = true
+ignore.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+toml = "1.1.2"
+serde_json.workspace = true
+globset = "0.4.18"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
+
+```
+
+### Path: ./.editorconfig
+```
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.rs]
+indent_style = space
+indent_size = 4
+
+[*.toml]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+```
+
+### Path: ./justfile
+```
+# Rustodian Justfile — Developer convenience commands
+# Usage: just <recipe>
+
+set dotenv-load
+
+# Default: run all checks
+default: fmt clippy test
+
+# Format all code
+fmt:
+    cargo fmt --all
+
+# Check formatting (CI mode)
+fmt-check:
+    cargo fmt --all -- --check
+
+# Run clippy lints
+clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Run all tests
+test:
+    cargo test --workspace
+
+# Run tests with output
+test-verbose:
+    cargo test --workspace -- --nocapture
+
+# Build all crates
+build:
+    cargo build --workspace
+
+# Build in release mode
+build-release:
+    cargo build --workspace --release
+
+# Run the CLI
+run *ARGS:
+    cargo run -p rustodian-cli -- {{ARGS}}
+
+# Check documentation builds
+doc:
+    RUSTDOCFLAGS="-Dwarnings" cargo doc --workspace --no-deps
+
+# Open documentation in browser
+doc-open:
+    cargo doc --workspace --no-deps --open
+
+# Run cargo deny checks
+deny:
+    cargo deny check
+
+# Run all CI checks locally
+ci: fmt-check clippy test doc deny
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Run xtask commands
+xtask *ARGS:
+    cargo run -p xtask -- {{ARGS}}
+
+```
+
+### Path: ./.gitignore
+```
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Database (local dev)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Coverage
+lcov.info
+tarpaulin-report.html
+
+# OS
+Thumbs.db
+# rag_export/
+*.log
+
+# Generated log files
+clippy.log
+test.log
+
+# Working/scratch docs
+gemini.md
+rag_*.md
+
+```
+
+### Path: ./rustfmt.toml
+```
+edition = "2024"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+```
+
 ### Path: ./cliff.toml
 ```
 [changelog]
@@ -549,6 +588,35 @@ tag_pattern = "v[0-9]*"
 
 ```
 
+### Path: ./.github/dependabot.yml
+```
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      rust-dependencies:
+        patterns:
+          - '*'
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+```
+
+### Path: ./.github/ISSUE_TEMPLATE/config.yml
+```
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions
+    url: https://github.com/drawmeanelephant/rustodian/discussions
+    about: Ask questions and discuss ideas
+
+```
+
 ### Path: ./.github/workflows/security-audit.yml
 ```
 name: Security Audit
@@ -570,6 +638,66 @@ jobs:
       - uses: actions-rust-lang/audit@v1
         with:
           ignore: RUSTSEC-2026-0195,RUSTSEC-2026-0194,RUSTSEC-2026-0192
+
+```
+
+### Path: ./.github/workflows/release.yml
+```
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p rustodian-cli
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rustodian-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/rustodian-cli
+            target/${{ matrix.target }}/release/rustodian-cli.exe
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            rustodian-*/rustodian-cli*
 
 ```
 
@@ -673,130 +801,3 @@ jobs:
 
 ```
 
-### Path: ./.github/workflows/release.yml
-```
-name: Release
-
-on:
-  push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p rustodian-cli
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: rustodian-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/rustodian-cli
-            target/${{ matrix.target }}/release/rustodian-cli.exe
-
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-      - name: Create Release
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: |
-            rustodian-*/rustodian-cli*
-
-```
-
-### Path: ./.github/ISSUE_TEMPLATE/config.yml
-```
-blank_issues_enabled: true
-contact_links:
-  - name: Discussions
-    url: https://github.com/drawmeanelephant/rustodian/discussions
-    about: Ask questions and discuss ideas
-
-```
-
-### Path: ./.github/dependabot.yml
-```
-version: 2
-updates:
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      rust-dependencies:
-        patterns:
-          - '*'
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-
-```
-
-### Path: ./rustfmt.toml
-```
-edition = "2024"
-max_width = 100
-use_field_init_shorthand = true
-use_try_shorthand = true
-
-```
-
-### Path: ./.editorconfig
-```
-root = true
-
-[*]
-end_of_line = lf
-insert_final_newline = true
-trim_trailing_whitespace = true
-charset = utf-8
-
-[*.rs]
-indent_style = space
-indent_size = 4
-
-[*.toml]
-indent_style = space
-indent_size = 4
-
-[*.{yml,yaml}]
-indent_style = space
-indent_size = 2
-
-[*.md]
-trim_trailing_whitespace = false
-
-[Makefile]
-indent_style = tab
-
-```
