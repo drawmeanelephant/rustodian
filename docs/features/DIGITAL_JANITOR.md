@@ -1,13 +1,13 @@
 # Digital Janitor
 
-The Digital Janitor is an autonomous workspace cruft purger. It inspects tracked projects for bloated build artifacts and temporary directories, calculates reclaimable bytes, and optionally purges them to reclaim disk space.
+The Digital Janitor is an autonomous workspace cruft purger that inspects tracked projects for bloated build artifacts and temporary directories, calculates reclaimable bytes, and optionally purges them.
 
 ## Cruft Targets
 
 The Janitor targets specific well-known artifact directories that are generally safe to remove because they can be easily reconstructed by standard build tools.
 
 | Target Directory | Description                       | Why it's safe to delete                                       | Typical Size Impact |
-| ---------------- | --------------------------------- | ------------------------------------------------------------- | ------------------- |
+|------------------|-----------------------------------|---------------------------------------------------------------|---------------------|
 | `target`         | Rust build directory              | Rebuilt on next `cargo build`                                 | Very High (1GB+)    |
 | `node_modules`   | Node.js / JavaScript packages     | Reinstalled on next `npm install` or `yarn`                   | High (500MB+)       |
 | `.venv`          | Python virtual environment        | Can be recreated via `python -m venv .venv` and `pip install` | Medium (100MB+)     |
@@ -33,7 +33,7 @@ $ rustodian janitor example-rust-app
 +--------------+-----------------------+-----------+
 | Cruft Target | Status                | Bytes     |
 +==============+=======================+===========+
-| target       | Reclaimable (Dry Run) | 892341020 |
+| target       | Reclaimable (Dry Run) |           |
 +--------------+-----------------------+-----------+
 | Total        | Reclaimable (Dry Run) | 892341020 |
 +--------------+-----------------------+-----------+
@@ -45,7 +45,7 @@ $ rustodian janitor example-rust-app --purge
 +--------------+-----------+-----------+
 | Cruft Target | Status    | Bytes     |
 +==============+===========+===========+
-| target       | Reclaimed | 892341020 |
+| target       | Reclaimed |           |
 +--------------+-----------+-----------+
 | Total        | Reclaimed | 892341020 |
 +--------------+-----------+-----------+
