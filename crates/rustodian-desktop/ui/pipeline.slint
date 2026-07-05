@@ -130,9 +130,9 @@ export component PipelineWindow inherits Window {
                     spacing: 16px;
                     Text { text: "Repository Ingest"; font-size: 24px; color: #fff; font-weight: 700; }
                     Text { text: "Repo Slug"; color: #cbd5e1; }
-                    LineEdit { text <=> root.repo-slug; }
+                    LineEdit { text <=> root.repo-slug; enabled: !root.working; }
                     Text { text: "Target Project"; color: #cbd5e1; }
-                    LineEdit { text <=> root.target-project; }
+                    LineEdit { text <=> root.target-project; enabled: !root.working; }
                     Button {
                         text: root.working ? "Working..." : "Ingest Repository";
                         enabled: !root.working;
@@ -146,9 +146,10 @@ export component PipelineWindow inherits Window {
                     spacing: 16px;
                     Text { text: "Agent Export"; font-size: 24px; color: #fff; font-weight: 700; }
                     Text { text: "Target Project"; color: #cbd5e1; }
-                    LineEdit { text <=> root.target-project; }
+                    LineEdit { text <=> root.target-project; enabled: !root.working; }
                     Button {
                         text: "Export";
+                        enabled: !root.working;
                         clicked => { root.trigger-agent-export(); }
                     }
                 }
@@ -298,6 +299,7 @@ export component PipelineWindow inherits Window {
                                             Text { text: "cmd: " + cmd.cmd + " " + cmd.args; color: #94a3b8; font-family: "monospace"; }
                                             Button {
                                                 text: "Run Trigger";
+                                                enabled: !root.working;
                                                 clicked => { root.run-command(root.projects[root.selected-project-index].name, cmd.name); }
                                             }
                                         }

@@ -292,12 +292,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
     window.on_trigger_janitor_clean(move |proj_id_str, dry_run| {
         if let Some(win) = window_weak_clone.upgrade() {
+            win.set_working(true);
             if let Ok(lock) = cache_ref_janitor.lock() {
                 if let Some(proj) = lock
                     .iter()
                     .find(|p| p.id.to_string() == proj_id_str.as_str())
                 {
-                    win.set_working(true);
                     win.set_janitor_status(if dry_run {
                         "Scanning workspace...".into()
                     } else {
@@ -309,7 +309,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         project_path: proj.path.clone(),
                         dry_run,
                     });
+                } else {
+                    win.set_working(false);
                 }
+            } else {
+                win.set_working(false);
             }
         }
     });
@@ -319,17 +323,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let window_weak_clone = window.as_weak();
     window.on_trigger_ingest(move || {
         if let Some(win) = window_weak_clone.upgrade() {
+            win.set_working(true);
             let slug = win.get_repo_slug().to_string();
             let path = PathBuf::from(&slug);
 
             if slug.trim().is_empty() {
                 win.set_stream_logs("Error: Repo slug cannot be empty\n".into());
+                win.set_working(false);
                 return;
             }
-
-            win.set_working(true);
             if let Err(e) = gui_tx_clone.send(GuiMessage::ScanProjects { path }) {
                 tracing::error!("Worker channel closed unexpectedly: {e}");
+                win.set_working(false);
             }
         }
     });
@@ -340,6 +345,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let cache_ref = Arc::clone(&projects_cache);
     window.on_run_command(move |proj_name, cmd_name| {
         if let Some(win) = window_weak_clone.upgrade() {
+            win.set_working(true);
             let proj_name_str = proj_name.to_string();
             let cmd_name_str = cmd_name.to_string();
 
@@ -352,7 +358,6 @@ fn main() -> Result<(), slint::PlatformError> {
                         .iter()
                         .find(|c| c.name == cmd_name_str)
                     {
-                        win.set_working(true);
                         let _ = gui_tx_clone.send(GuiMessage::RunCommand {
                             project_id: proj.id.clone(),
                             project_path: proj.path.clone(),
@@ -360,8 +365,14 @@ fn main() -> Result<(), slint::PlatformError> {
                             command_str: cmd.command.clone(),
                             use_shell: cmd.use_shell,
                         });
+                    } else {
+                        win.set_working(false);
                     }
+                } else {
+                    win.set_working(false);
                 }
+            } else {
+                win.set_working(false);
             }
         }
     });
