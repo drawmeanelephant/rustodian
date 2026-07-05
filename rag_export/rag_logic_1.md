@@ -1,53 +1,5 @@
 # RAG Export - Logic (Part 1)
 
-### Path: ./patch_store.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    target_method = "    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {\n        let conn = self.get_conn()?;\n        conn.execute(\n            \"INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value;\",\n            params![key, value],\n        )\n        .map_err(|e| CoreError::Storage(format!(\"insert error: {e}\")))?;\n\n        Ok(())\n    }"
-
-    new_method = """    pub fn list_settings(&self) -> Result<std::collections::HashMap<String, String>, CoreError> {
-        let conn = self.get_conn()?;
-        let mut stmt = conn
-            .prepare("SELECT key, value FROM settings")
-            .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                let key: String = row.get(0)?;
-                let value: String = row.get(1)?;
-                Ok((key, value))
-            })
-            .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
-
-        let mut settings = std::collections::HashMap::new();
-        for row in rows {
-            if let Ok((k, v)) = row {
-                settings.insert(k, v);
-            }
-        }
-        Ok(settings)
-    }"""
-
-    if target_method not in content:
-        print("Target method not found in file")
-        sys.exit(1)
-
-    content = content.replace(target_method, target_method + "\n\n" + new_method)
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('crates/rustodian-storage/src/store.rs')
-
-```
-
 ### Path: ./test_symlink.rs
 ```
 use std::os::unix::fs::symlink;
@@ -64,130 +16,36 @@ def patch_file(filepath):
     with open(filepath, 'r') as f:
         content = f.read()
 
-    new_content = content + "\n\n/// Idiomatic Drop guard: terminates orphan background processes automatically\nimpl Drop for DefaultRunningProcess {\n    fn drop(&mut self) {\n        let _ = self.kill();\n    }\n}\n"
+    target_block = """/// Idiomatic Drop guard: terminates orphan background processes automatically
+impl Drop for DefaultRunningProcess {
+    fn drop(&mut self) {
+        let _ = self.kill();
+    }
+}
+"""
 
-    with open(filepath, 'w') as f:
-        f.write(new_content)
+    if target_block not in content:
+        print("Target block not found, maybe I didn't write it exactly right?")
+        # Find exact
+        if "impl Drop for DefaultRunningProcess" in content:
+            print("Found drop block")
+            pass
 
-    print("Patched successfully")
+    content = content.replace(target_block, "")
+
+    tests_block = """#[cfg(test)]
+mod tests {"""
+
+    if tests_block in content:
+        content = content.replace(tests_block, target_block + "\n" + tests_block)
+        with open(filepath, 'w') as f:
+            f.write(content)
+        print("Patched successfully")
+    else:
+        print("Could not find tests block")
+        sys.exit(1)
 
 patch_file('crates/rustodian-core/src/runner.rs')
-
-```
-
-### Path: ./patch_store_flatten.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    target = """        let mut settings = std::collections::HashMap::new();
-        for row in rows {
-            if let Ok((k, v)) = row {
-                settings.insert(k, v);
-            }
-        }"""
-
-    new_target = """        let mut settings = std::collections::HashMap::new();
-        for (k, v) in rows.flatten() {
-            settings.insert(k, v);
-        }"""
-
-    if target in content:
-        content = content.replace(target, new_target)
-    else:
-        print("Target not found")
-        sys.exit(1)
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('crates/rustodian-storage/src/store.rs')
-
-```
-
-### Path: ./patch_worker.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    target = """            GuiMessage::SaveSetting { key, value } => {
-                let _ = state.store.set_setting(&key, &value);
-            }"""
-
-    new_target = """            GuiMessage::SaveSetting { key, value } => {
-                let _ = state.store.set_setting(&key, &value);
-            }
-            GuiMessage::LoadSettings => {
-                let settings = state.store.list_settings().unwrap_or_default();
-                let _ = tx.send(WorkerMessage::SettingsLoaded(settings));
-                repaint_fn();
-            }"""
-
-    if target in content:
-        content = content.replace(target, new_target)
-    else:
-        print("Worker target not found")
-        sys.exit(1)
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('crates/rustodian-desktop/src/worker.rs')
-
-```
-
-### Path: ./patch_clippy.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    # Fix gui_tx_close -> gui_close_tx
-    content = content.replace(
-        "    let gui_tx_close = gui_tx.clone();\n    window.window().on_close_requested(move || {\n        let _ = gui_tx_close.send(GuiMessage::KillCommand);",
-        "    let gui_close_tx = gui_tx.clone();\n    window.window().on_close_requested(move || {\n        let _ = gui_close_tx.send(GuiMessage::KillCommand);"
-    )
-
-    # Fix clones in main.rs
-    content = content.replace(
-        "*lock = repo_slug.clone();",
-        "(*lock).clone_from(repo_slug);"
-    )
-
-    content = content.replace(
-        "*lock = target_project.clone();",
-        "(*lock).clone_from(target_project);"
-    )
-
-    content = content.replace(
-        "*last_slug = current_slug.clone();",
-        "(*last_slug).clone_from(&current_slug);"
-    )
-
-    content = content.replace(
-        "*lock = current_target.clone();",
-        "(*lock).clone_from(&current_target);"
-    )
-
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('crates/rustodian-desktop/src/main.rs')
 
 ```
 
@@ -7186,6 +7044,13 @@ impl RunningProcess for DefaultRunningProcess {
     }
 }
 
+/// Idiomatic Drop guard: terminates orphan background processes automatically
+impl Drop for DefaultRunningProcess {
+    fn drop(&mut self) {
+        let _ = self.kill();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -7211,12 +7076,6 @@ mod tests {
     }
 }
 
-/// Idiomatic Drop guard: terminates orphan background processes automatically
-impl Drop for DefaultRunningProcess {
-    fn drop(&mut self) {
-        let _ = self.kill();
-    }
-}
 
 ```
 
@@ -7389,291 +7248,6 @@ mod tests {
         assert_eq!(buf2.line_count(), 1);
     }
 }
-
-```
-
-### Path: ./finish_step.py
-```
-import os
-print("Steps 1-7 completed. Time to run pre-commit instructions.")
-
-```
-
-### Path: ./patch_message.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    # Add LoadSettings to GuiMessage
-    gui_message_target = "    /// Fetch open pull requests for a given repository slug.\n    FetchPullRequests { repo_slug: String },"
-    new_gui_message = "    /// Fetch open pull requests for a given repository slug.\n    FetchPullRequests { repo_slug: String },\n    /// Load all settings from the database.\n    LoadSettings,"
-
-    if gui_message_target in content:
-        content = content.replace(gui_message_target, new_gui_message)
-    else:
-        print("GuiMessage target not found")
-        sys.exit(1)
-
-    # Add SettingsLoaded to WorkerMessage
-    worker_message_target = "    /// Returns fetched Pull Requests.\n    PullRequestsLoaded(Result<Vec<rustodian_types::PullRequest>, String>),"
-    new_worker_message = "    /// Returns fetched Pull Requests.\n    PullRequestsLoaded(Result<Vec<rustodian_types::PullRequest>, String>),\n    /// Returns all settings loaded from the database.\n    SettingsLoaded(std::collections::HashMap<String, String>),"
-
-    if worker_message_target in content:
-        content = content.replace(worker_message_target, new_worker_message)
-    else:
-        print("WorkerMessage target not found")
-        sys.exit(1)
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('crates/rustodian-desktop/src/message.rs')
-
-```
-
-### Path: ./patch_main_1.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    # Step 1: Add caches before GUI Message Receiver Loop
-    target_1 = """    // 5. Spawn GUI Message Receiver Loop
-    let window_receiver_weak = window_weak.clone();
-    let projects_cache = Arc::new(std::sync::Mutex::new(Vec::<rustodian_types::Project>::new()));
-    let projects_cache_clone = Arc::clone(&projects_cache);
-
-    // Command process execution tracker
-    let active_run_id = Arc::new(std::sync::Mutex::new(Option::<Uuid>::None));
-    let active_run_id_receiver = Arc::clone(&active_run_id);
-
-    let gui_tx_receiver_loop = gui_tx.clone();"""
-
-    new_target_1 = """    // 5. Spawn GUI Message Receiver Loop
-    let window_receiver_weak = window_weak.clone();
-    let projects_cache = Arc::new(std::sync::Mutex::new(Vec::<rustodian_types::Project>::new()));
-    let projects_cache_clone = Arc::clone(&projects_cache);
-
-    // Command process execution tracker
-    let active_run_id = Arc::new(std::sync::Mutex::new(Option::<Uuid>::None));
-    let active_run_id_receiver = Arc::clone(&active_run_id);
-
-    let last_saved_repo_slug = Arc::new(std::sync::Mutex::new(String::new()));
-    let last_saved_target_project = Arc::new(std::sync::Mutex::new(String::new()));
-
-    let last_saved_repo_slug_receiver = Arc::clone(&last_saved_repo_slug);
-    let last_saved_target_project_receiver = Arc::clone(&last_saved_target_project);
-
-    let gui_tx_receiver_loop = gui_tx.clone();"""
-
-    if target_1 in content:
-        content = content.replace(target_1, new_target_1)
-    else:
-        print("Target 1 not found")
-        sys.exit(1)
-
-    # Step 2: Add thread variables and SettingsLoaded arm
-    target_2 = """        while let Ok(msg) = worker_rx.recv() {
-            let window_inner = window_receiver_weak.clone();
-            let cache = Arc::clone(&projects_cache_clone);
-            let active_run_id_receiver_clone = Arc::clone(&active_run_id_receiver);
-            let gui_tx_receiver = gui_tx_receiver_loop.clone();
-
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = window_inner.upgrade() {
-                    match msg {"""
-
-    new_target_2 = """        while let Ok(msg) = worker_rx.recv() {
-            let window_inner = window_receiver_weak.clone();
-            let cache = Arc::clone(&projects_cache_clone);
-            let active_run_id_receiver_clone = Arc::clone(&active_run_id_receiver);
-            let gui_tx_receiver = gui_tx_receiver_loop.clone();
-
-            let last_slug_cache = Arc::clone(&last_saved_repo_slug_receiver);
-            let last_target_cache = Arc::clone(&last_saved_target_project_receiver);
-
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = window_inner.upgrade() {
-                    match msg {
-                        WorkerMessage::SettingsLoaded(settings) => {
-                            if let Some(repo_slug) = settings.get("repo_slug") {
-                                ui.set_repo_slug(repo_slug.as_str().into());
-                                if let Ok(mut lock) = last_slug_cache.lock() {
-                                    *lock = repo_slug.clone();
-                                }
-                            }
-                            if let Some(target_project) = settings.get("target_project") {
-                                ui.set_target_project(target_project.as_str().into());
-                                if let Ok(mut lock) = last_target_cache.lock() {
-                                    *lock = target_project.clone();
-                                }
-                            }
-                        }"""
-
-    if target_2 in content:
-        content = content.replace(target_2, new_target_2)
-    else:
-        print("Target 2 not found")
-        sys.exit(1)
-
-    # Step 3: Startup dispatches
-    target_3 = """    // Initial load trigger on bootstrap
-    let _ = gui_tx.send(GuiMessage::LoadProjects);"""
-
-    new_target_3 = """    // Initial load trigger on bootstrap
-    let _ = gui_tx.send(GuiMessage::LoadProjects);
-    let _ = gui_tx.send(GuiMessage::LoadSettings);"""
-
-    if target_3 in content:
-        content = content.replace(target_3, new_target_3)
-    else:
-        print("Target 3 not found")
-        sys.exit(1)
-
-    # Step 4: Timer variables and logic
-    target_4 = """    // Project selection tracker to pre-populate repository slug from remote
-    let active_selected_idx = Arc::new(std::sync::Mutex::new(-1));
-
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        std::time::Duration::from_secs(2),
-        move || {
-            if let Some(win) = window_timer_weak.upgrade() {
-                let selected_idx = win.get_selected_project_index();
-
-                // Track project selection changes to extract repo slug"""
-
-    new_target_4 = """    // Project selection tracker to pre-populate repository slug from remote
-    let active_selected_idx = Arc::new(std::sync::Mutex::new(-1));
-
-    let last_saved_repo_slug_timer = Arc::clone(&last_saved_repo_slug);
-    let last_saved_target_project_timer = Arc::clone(&last_saved_target_project);
-    let gui_tx_timer_clone = gui_tx_timer.clone();
-
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        std::time::Duration::from_secs(2),
-        move || {
-            if let Some(win) = window_timer_weak.upgrade() {
-                let selected_idx = win.get_selected_project_index();
-
-                let current_slug = win.get_repo_slug().to_string();
-                let current_target = win.get_target_project().to_string();
-
-                if let Ok(mut last_slug) = last_saved_repo_slug_timer.lock() {
-                    if !current_slug.is_empty() && current_slug != *last_slug {
-                        *last_slug = current_slug.clone();
-                        let _ = gui_tx_timer_clone.send(GuiMessage::SaveSetting {
-                            key: "repo_slug".to_string(),
-                            value: current_slug,
-                        });
-                    }
-                }
-
-                if let Ok(mut lock) = last_saved_target_project_timer.lock() {
-                    if !current_target.is_empty() && current_target != *lock {
-                        *lock = current_target.clone();
-                        let _ = gui_tx_timer_clone.send(GuiMessage::SaveSetting {
-                            key: "target_project".to_string(),
-                            value: current_target,
-                        });
-                    }
-                }
-
-                // Track project selection changes to extract repo slug"""
-
-    if target_4 in content:
-        content = content.replace(target_4, new_target_4)
-    else:
-        print("Target 4 not found")
-        sys.exit(1)
-
-    # Step 5: on_close_requested hook
-    target_5 = """    window.run()
-}"""
-
-    new_target_5 = """    let gui_tx_close = gui_tx.clone();
-    window.window().on_close_requested(move || {
-        let _ = gui_tx_close.send(GuiMessage::KillCommand);
-        slint::CloseRequestResponse::HideWindow
-    });
-
-    window.run()
-}"""
-
-    if target_5 in content:
-        content = content.replace(target_5, new_target_5)
-    else:
-        print("Target 5 not found")
-        sys.exit(1)
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('crates/rustodian-desktop/src/main.rs')
-
-```
-
-### Path: ./finish_step.sh
-```
-#!/bin/bash
-echo "plan step complete"
-
-```
-
-### Path: ./patch_ci.py
-```
-import sys
-
-def patch_file(filepath):
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    # Apply environment variables
-    content = content.replace(
-        "  clippy:\n    name: Clippy\n    runs-on: ubuntu-latest\n    steps:",
-        "  clippy:\n    name: Clippy\n    runs-on: ubuntu-latest\n    env:\n      SLINT_BACKEND: headless\n    steps:"
-    )
-
-    content = content.replace(
-        "  test:\n    name: Test (${{ matrix.os }})\n    runs-on: ${{ matrix.os }}\n    strategy:",
-        "  test:\n    name: Test (${{ matrix.os }})\n    runs-on: ${{ matrix.os }}\n    env:\n      SLINT_BACKEND: headless\n    strategy:"
-    )
-
-    content = content.replace(
-        "  doc:\n    name: Documentation\n    runs-on: ubuntu-latest\n    steps:",
-        "  doc:\n    name: Documentation\n    runs-on: ubuntu-latest\n    env:\n      SLINT_BACKEND: headless\n    steps:"
-    )
-
-    # Apply apt install commands
-    old_apt = "sudo apt update && sudo apt install -y pkg-config libfontconfig1-dev"
-    new_apt = "sudo apt update && sudo apt install -y pkg-config libfontconfig1-dev libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev"
-
-    content = content.replace(
-        "        run: " + old_apt,
-        "        run: " + new_apt
-    )
-
-    # Remove excludes
-    content = content.replace(" --exclude rustodian-desktop", "")
-
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-    print("Patched successfully")
-
-patch_file('.github/workflows/ci.yml')
 
 ```
 

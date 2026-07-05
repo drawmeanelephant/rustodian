@@ -30,7 +30,7 @@ tarpaulin-report.html
 
 # OS
 Thumbs.db
-rag_export/
+# rag_export/
 *.log
 
 # Generated log files
