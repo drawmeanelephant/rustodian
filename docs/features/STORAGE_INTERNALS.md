@@ -4,7 +4,7 @@ This document outlines the SQLite persistence layer implemented in `crates/rusto
 
 ## Database Schema
 
-The database relies on a straightforward hybrid relational/document schema:
+The database relies on a straightforward hybrid relational/document schema. This structure balances queryable relational data with flexible schema-less JSON storage.
 
 ```sql
 CREATE TABLE projects (
@@ -58,30 +58,36 @@ CREATE INDEX idx_project_logs_project ON project_logs(project_id, run_at DESC);
 
 ## Concurrency
 
-Rustodian uses `r2d2` for pooling and Write-Ahead Logging (`WAL`), aiding concurrent access. This prevents locks in the desktop app during background scans. A `busy_timeout = 5000` prevents transient failures if locked.
+Rustodian uses `r2d2` for connection pooling and configures SQLite in Write-Ahead Logging (`WAL`) mode.
 
-## Upserts
-
-Projects use `ON CONFLICT(path) DO UPDATE`. Notably, `discovered_at` is updated during upserts (`discovered_at=excluded.discovered_at`). `project_languages` uses delete-and-reinsert to sync cleanly.
+**Why WAL and r2d2?** WAL allows simultaneous readers and a single writer, which is crucial for the `rustodian-desktop` application. It ensures background scanning threads can safely read and write to the database without locking up the Slint UI thread's reads. A `busy_timeout = 5000` is also employed to prevent transient failure if the single writer lock is temporarily held.
 
 ## JSON Metadata Strategy
 
-Instead of strict columns, `metadata_json` stores a blob structured as: `{"meta": project.metadata, "vcs": project.vcs, "languages": project.languages}`.
+Instead of defining strict columns for every possible project attribute, flexible data is serialized into a single `metadata_json` column. The structure maps to: `{"meta": project.metadata, "vcs": project.vcs, "languages": project.languages}`.
 
-**Why JSON?** Keeps the schema stable and avoids migrations when domains evolve, allowing rapid struct development via `serde_json`.
+**Why JSON?** This minimizes schema migrations as the domain model evolves. By offloading complex structure to `serde_json`, we gain rapid iteration speed for Rust structs at the cost of slightly higher parsing overhead during reads.
 
-## Languages Side Table
+## Languages Side-Table
 
-**Why a side-table?** Purely for read performance. SQLite's `json_extract` is slow over thousands of rows; this table guarantees fast filtering for desktop views.
+We maintain a `project_languages` side-table with an `ON DELETE CASCADE` foreign key reference to `projects`.
 
-## Deserialization
+**Why a side-table?** While languages are also stored inside `metadata_json`, extracting and filtering on JSON data via SQLite's `json_extract` scales poorly over thousands of rows. The side-table guarantees fast relational querying and filtering for the desktop UI views.
 
-`parse_project_row` centralizes translation to `Project` structs to avoid boilerplate.
+## Upserts & Data Syncing
 
-## Tradeoffs
+When saving a project, the system uses an `ON CONFLICT(path) DO UPDATE` query to upsert records.
 
-- **Malformed Records**: Invalid JSON skips the row rather than failing the query, prioritizing UI stability.
-- **Timestamps**: Upserts overwrite `discovered_at`, sacrificing first-seen tracking for simpler queries.
-- **WAL Limits**: WAL is bottlenecked by a single writer; writes over 5000ms will lock the DB.
-- **Write Churn**: Delete-and-reinsert for languages increases WAL size for simpler logic.
-- **JSON Parsing**: Using JSON avoids migrations but incurs CPU cost on every read due to `serde_json` deserialization.
+**Why overwrite `discovered_at`?** The upsert logic intentionally overwrites `discovered_at` (`discovered_at=excluded.discovered_at`). While this sacrifices the ability to track the immutable "first-seen" timestamp of a project, it drastically simplifies the SQL queries by avoiding complex conditional merges.
+
+Updating the `project_languages` side-table relies on a simple delete-and-reinsert pattern for a given `project_id`.
+
+**Why delete-and-reinsert?** It eliminates the need for calculating a complex diff (inserting new, updating existing, removing deleted languages) in SQL, heavily reducing logic complexity at the cost of increased write churn.
+
+## Known Tradeoffs
+
+- **Malformed Records Handling:** Bulk queries (like `list_projects`) are designed to be resilient. If a single row contains corrupted JSON, the system skips it, logs a warning, and continues. This tradeoff prevents an entire database query from failing due to one bad record, maintaining stability in the desktop UI.
+- **WAL Writer Bottleneck:** WAL only allows one concurrent writer. Heavy or slow transactions can lock out other write operations, causing failures if the 5000ms timeout is exceeded.
+- **Write Churn:** The delete-and-reinsert synchronization pattern for `project_languages` increases the size of the WAL file and write IOPS due to unnecessary row deletion and recreation.
+- **JSON Parsing Overhead:** Bypassing relational schema for `metadata_json` incurs a continuous CPU cost on every database read to deserialize records back into `Project` structs.
+- **Timestamps:** Upserts overwrite `discovered_at`, sacrificing first-seen tracking for simpler queries.
