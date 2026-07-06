@@ -50,6 +50,8 @@ pub enum GuiMessage {
     ToggleTask { task_id: String, completed: bool },
     /// Fetch open pull requests for a given repository slug.
     FetchPullRequests { repo_slug: String },
+    /// Load all settings from the database.
+    LoadSettings,
 }
 
 /// A parsed markdown block.
@@ -111,4 +113,6 @@ pub enum WorkerMessage {
     },
     /// Returns fetched Pull Requests.
     PullRequestsLoaded(Result<Vec<rustodian_types::PullRequest>, String>),
+    /// Returns all settings loaded from the database.
+    SettingsLoaded(std::collections::HashMap<String, String>),
 }

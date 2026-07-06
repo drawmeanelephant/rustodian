@@ -490,6 +490,27 @@ impl SqliteStore {
 
         Ok(())
     }
+
+    pub fn list_settings(&self) -> Result<std::collections::HashMap<String, String>, CoreError> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn
+            .prepare("SELECT key, value FROM settings")
+            .map_err(|e| CoreError::Storage(format!("prepare error: {e}")))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let key: String = row.get(0)?;
+                let value: String = row.get(1)?;
+                Ok((key, value))
+            })
+            .map_err(|e| CoreError::Storage(format!("query error: {e}")))?;
+
+        let mut settings = std::collections::HashMap::new();
+        for (k, v) in rows.flatten() {
+            settings.insert(k, v);
+        }
+        Ok(settings)
+    }
 }
 
 #[cfg(test)]

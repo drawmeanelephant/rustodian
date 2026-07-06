@@ -158,6 +158,13 @@ impl RunningProcess for DefaultRunningProcess {
     }
 }
 
+/// Idiomatic Drop guard: terminates orphan background processes automatically
+impl Drop for DefaultRunningProcess {
+    fn drop(&mut self) {
+        let _ = self.kill();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
