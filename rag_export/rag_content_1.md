@@ -556,22 +556,22 @@ $ rustodian janitor example-rust-app --purge
 
 ## Directory Traversal (`ignore` vs `walkdir`)
 
-Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` because `ignore` automatically respects `.gitignore` and `.ignore` rules. Without this, walking a directory would waste vast amounts of I/O stat calls descending into massive build artifact folders. For example, skipping a `node_modules/` or `target/` directory automatically prevents traversing tens of thousands of unnecessary files. This ensures rapid discovery focused solely on tracked source code, avoiding severe performance bottlenecks.
+Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` to respect `.gitignore` and `.ignore` rules automatically. Without this, scanning would waste substantial I/O stat calls descending into large, irrelevant build artifact folders. By automatically skipping directories like `node_modules/` (Node) or `target/` (Rust), `ignore` prevents traversing tens of thousands of generated files. This avoids severe performance bottlenecks, focusing discovery entirely on tracked source code.
 
-## Performance: `ScanConfig.max_depth`
+## Recursion Limits
 
-The `ScanConfig.max_depth` configuration limits recursion depth. Scanning deep monorepos with hundreds of nested directories can be prohibitively slow. Enforcing a maximum depth restricts unbounded scan times while capturing typical project structures. A depth of 0 halts traversal entirely, returning empty results.
+`ScanConfig.max_depth` limits recursion depth. Scanning deeply nested monorepos can cause prohibitively long execution times. Enforcing a maximum depth restricts scan time while still capturing typical project structures. A depth of `0` halts traversal immediately.
 
-## Language Detection Pattern
+## Language Detection and Polyglot Projects
 
-Language detection uses pure functions in `detect_languages` (e.g., `detect_rust`). Each directory is examined for specific marker files. These detectors are evaluated independently. If a directory contains competing manifests, such as both `Cargo.toml` and `package.json`, it is recognized as a polyglot project. This yields independent, High-confidence detections for both Rust and Node, without reducing the confidence of either.
+Language detection utilizes pure functions (like `detect_rust`) to evaluate directories for specific marker files. Detectors are evaluated independently. When a directory contains competing manifests (e.g., both `Cargo.toml` and `package.json`), Rustodian recognizes a polyglot project. It yields independent, High-confidence detections for both languages, without reducing the confidence level of either.
 
-### Markers and Confidence Table
+### Markers and Confidence Rules
 
 | Language | Marker File(s) | Confidence Rules |
 |----------|----------------|------------------|
 | **Rust** | `Cargo.toml`, `Cargo.lock` | **High:** `Cargo.toml` exists. **Medium:** Only `Cargo.lock` exists. |
-| **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only lockfile or `requirements.txt` config exists. |
+| **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only a lockfile or `requirements.txt` exists. |
 | **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Any marker matched (always High, even with just lockfiles). |
 | **Go**   | `go.mod`, `go.sum` | **High:** Any marker matched (always High, even with just lockfiles). |
 | **Ruby** | `Gemfile`, `*.gemspec`, `Gemfile.lock` | **High:** `Gemfile` or `*.gemspec` exists. **Medium:** Only `Gemfile.lock` exists. |
@@ -579,17 +579,17 @@ Language detection uses pure functions in `detect_languages` (e.g., `detect_rust
 
 ## Detection Confidence Levels
 
-The `DetectionConfidence` enum categorizes evidence strength:
+The `DetectionConfidence` enum reflects evidence strength:
 
-- **High:** A definitive manifest file is present (e.g., `Cargo.toml`, `package.json`, `go.mod`), strongly indicating a project root. Note that Node and Go always yield High confidence, even if only lockfiles are found.
-- **Medium:** Supporting evidence exists, but is not definitive. For instance, a `Cargo.lock` without a `Cargo.toml` might indicate a sub-crate, and a standalone `requirements.txt` might be a loosely tracked dependency list.
-- **Low:** Weak signals (e.g., file extensions). Currently unused, but designed for future heuristics when only source files exist.
+- **High:** A definitive manifest exists (e.g., `Cargo.toml`, `package.json`), indicating a project root. For Node and Go, any marker (even just a lockfile) yields High confidence.
+- **Medium:** Supporting evidence exists, but isn't definitive. Examples include a `Cargo.lock` without a `Cargo.toml` (potentially a sub-crate) or a standalone `requirements.txt`.
+- **Low:** Weak signals (e.g., only file extensions). Currently unused, reserved for future heuristics.
 
 ## Self-Healing Garbage Collection
 
-During every scan (`Custodian::scan`), Rustodian performs a self-healing garbage collection pass. It checks all tracked projects; if a project's filesystem path no longer exists, it purges the project from the database.
+Every scan (`Custodian::scan`) performs a self-healing garbage collection pass. If a tracked project's path no longer exists on disk, Rustodian purges it from the database.
 
-Crucially, the `project_logs` table schema (which stores audit history like janitor actions) defines a foreign key `REFERENCES projects(id) ON DELETE CASCADE`. When the self-healing process deletes a purged project's row from the `projects` table, SQLite automatically cascade-deletes all associated audit logs. This guarantees that no orphaned log records remain, allowing the database to self-correct effortlessly without manual intervention.
+Crucially, dependent tables handle cascading deletions. The `project_logs` (which stores audit history) and `project_languages` tables define foreign keys referencing `projects(id)` with `ON DELETE CASCADE`. When the scan drops a missing project, SQLite automatically cascade-deletes all its associated languages and audit logs. This prevents orphaned records, keeping the schema clean and self-correcting without manual intervention.
 
 ```
 
