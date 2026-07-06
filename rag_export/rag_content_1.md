@@ -610,9 +610,13 @@ When Rustodian bootstraps and verifies projects, it isolates operations to preve
 | Language | Isolation Mechanism | Setup Command | Verify Command |
 | --- | --- | --- | --- |
 | Rust | No isolation (native `target/`) | `cargo build` | `cargo test` |
-| Node | Local `node_modules` directory | `[yarn/pnpm/bun/npm] install` | `[yarn/pnpm/bun/npm] test` |
+| Node | Local `node_modules` directory | `npm install` [^1] | `npm test` [^1] |
 | Go | `GOPATH` env var override to `.gopath` | `go mod download` | `go test ./...` |
-| Python | Virtual Env (`.venv`) directory | Unix: `.venv/bin/pip install -r requirements.txt`<br>and/or `.venv/bin/pip install .`<br>Win: `.venv\Scripts\pip install -r requirements.txt`<br>and/or `.venv\Scripts\pip install .` | Unix: `.venv/bin/pytest -v`<br>(fallback: `.venv/bin/python -m unittest discover`)<br>Win: `.venv\Scripts\pytest -v`<br>(fallback: `.venv\Scripts\python -m unittest discover`) |
+| Python | Virtual Env (`.venv`) directory | `pip install -r requirements.txt`<br>and/or `pip install .` [^2] | `pytest -v`<br>(fallback: `python -m unittest discover`) [^3] |
+
+[^1]: Node projects dynamically detect lockfiles to substitute `npm` with the correct package manager (`yarn`, `pnpm`, or `bun`).
+[^2]: Python installs dependencies sequentially. It runs the `requirements.txt` install if the file exists, and then the `.` install if `pyproject.toml` or `setup.py` exists. The executable path differs by OS (Unix: `.venv/bin/pip`, Windows: `.venv\Scripts\pip`).
+[^3]: The `pytest` executable is used if present in `.venv`, otherwise falls back to `python -m unittest discover`. The executable path differs by OS (Unix: `.venv/bin/`, Windows: `.venv\Scripts\`).
 
 ## Isolation Strategies
 
@@ -636,12 +640,13 @@ my-monorepo/
 │   └── package.json
 └── backend/ (Python)
     ├── pyproject.toml
+    ├── requirements.txt
     └── main.py
 ```
 
 When Rustodian scans this directory:
 1. **Frontend:** It detects `pnpm-lock.yaml`, isolating dependencies in `frontend/node_modules/` via `pnpm install`, and verifies using `pnpm test`.
-2. **Backend:** It creates `backend/.venv`. On Unix, it runs `backend/.venv/bin/pip install .` and verifies with `backend/.venv/bin/pytest -v` (or `unittest`). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
+2. **Backend:** It creates `backend/.venv`. On Unix, it installs sequentially running `backend/.venv/bin/pip install -r requirements.txt` followed by `backend/.venv/bin/pip install .`. It verifies with `backend/.venv/bin/pytest -v` (or `unittest`). Windows uses `backend\.venv\Scripts\pip` and `backend\.venv\Scripts\pytest`.
 
 Neither project affects the host system's global state or each other.
 
