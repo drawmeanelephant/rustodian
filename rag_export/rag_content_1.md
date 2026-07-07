@@ -438,7 +438,6 @@ Updating the `project_languages` side-table relies on a simple delete-and-reinse
 - **Write Churn:** The delete-and-reinsert synchronization pattern for `project_languages` increases the size of the WAL file and write IOPS due to unnecessary row deletion and recreation.
 - **JSON Parsing Overhead:** Bypassing relational schema for `metadata_json` incurs a continuous CPU cost on every database read to deserialize records back into `Project` structs.
 - **Timestamps:** Upserts overwrite `discovered_at`, sacrificing first-seen tracking for simpler queries.
-- **Log Rotation Limits:** The `prune_logs` method implements log rotation, limiting project execution logs to the 50 most recent entries. While this prevents unbounded database growth, it sacrifices long-term historical log retention.
 
 ```
 

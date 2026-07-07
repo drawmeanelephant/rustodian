@@ -33,8 +33,8 @@ CREATE TABLE scans (
 );
 
 CREATE TABLE settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL
 );
 
 CREATE TABLE remote_projects (
@@ -66,7 +66,7 @@ Rustodian uses `r2d2` for connection pooling and configures SQLite in Write-Ahea
 
 Instead of defining strict columns for every possible project attribute, flexible data is serialized into a single `metadata_json` column. The structure maps to: `{"meta": project.metadata, "vcs": project.vcs, "languages": project.languages}`.
 
-**Why JSON?** This minimizes schema migrations as the domain model evolves. By offloading complex structure to `serde_json`, we gain rapid iteration speed for Rust structs at the cost of slightly higher parsing overhead during reads.
+**Why JSON?** This minimizes schema migrations as the domain model evolves. By offloading complex project structure to `serde_json`, we gain rapid iteration speed for Rust structs at the cost of slightly higher parsing overhead during database reads.
 
 ## Languages Side-Table
 
