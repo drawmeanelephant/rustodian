@@ -505,7 +505,7 @@ The Digital Janitor is an autonomous workspace cruft purger that inspects tracke
 The Janitor targets specific well-known artifact directories that are generally safe to remove because they can be easily reconstructed by standard build tools.
 
 | Target Directory | Description                       | Why it's safe to delete                                       | Typical Size Impact |
-| :--------------- | :-------------------------------- | :------------------------------------------------------------ | :------------------ |
+|------------------|-----------------------------------|---------------------------------------------------------------|---------------------|
 | `target`         | Rust build directory              | Rebuilt on next `cargo build`                                 | Very High (1GB+)    |
 | `node_modules`   | Node.js / JavaScript packages     | Reinstalled on next `npm install` or `yarn`                   | High (500MB+)       |
 | `.venv`          | Python virtual environment        | Can be recreated via `python -m venv .venv` and `pip install` | Medium (100MB+)     |
@@ -517,9 +517,9 @@ The Janitor targets specific well-known artifact directories that are generally 
 
 ## Dry-run vs Purge
 
-By default, the Janitor operates in **dry-run** mode, calculating potential space savings via a recursive directory walk (`dirsize`) without deleting anything. To execute the actual deletion, you must explicitly provide the `--purge` flag.
+By default, the Janitor operates in **dry-run** mode, calculating potential space savings via a recursive directory walk (`dirsize`) without deleting anything. On deep or file-heavy directories, this calculation may take a noticeable amount of time. To execute the actual deletion, you must explicitly provide the `--purge` flag.
 
-Every successful purge operation is fully auditable. The Janitor logs the event to the `project_logs` database via `Custodian::store.save_log()`, recording the command (`janitor:clean`), targets removed, and total space reclaimed.
+Every successful purge operation is fully auditable. The Janitor logs the event to the `project_logs` database via `Custodian::store.save_log()`, recording the command (`janitor:clean`), targets removed, and total space reclaimed. You can query this history using `rustodian logs my-project`.
 
 ## Worked Example
 
@@ -528,11 +528,10 @@ Suppose you have a project with a stale Rust `target/` directory taking up about
 **Dry-run inspection (default):**
 ```bash
 $ rustodian janitor example-rust-app
-INFO  Found artifact directory target="target" size_bytes=892341020
 +--------------+-----------------------+-----------+
 | Cruft Target | Status                | Bytes     |
 +==============+=======================+===========+
-| target       | Reclaimable (Dry Run) | 892341020 |
+| target       | Reclaimable (Dry Run) |           |
 +--------------+-----------------------+-----------+
 | Total        | Reclaimable (Dry Run) | 892341020 |
 +--------------+-----------------------+-----------+
@@ -541,11 +540,10 @@ INFO  Found artifact directory target="target" size_bytes=892341020
 **Actual Purge operation:**
 ```bash
 $ rustodian janitor example-rust-app --purge
-INFO  Found artifact directory target="target" size_bytes=892341020
 +--------------+-----------+-----------+
 | Cruft Target | Status    | Bytes     |
 +==============+===========+===========+
-| target       | Reclaimed | 892341020 |
+| target       | Reclaimed |           |
 +--------------+-----------+-----------+
 | Total        | Reclaimed | 892341020 |
 +--------------+-----------+-----------+
@@ -553,7 +551,7 @@ INFO  Found artifact directory target="target" size_bytes=892341020
 
 ## Gotchas
 
-* **Permission Denied Errors:** If the Janitor encounters a permissions error and fails to remove a directory during a `--purge` operation (via `fs::remove_dir_all`), it warns via standard logging. However, unlike earlier versions, it correctly excludes the full directory size from the `bytes_reclaimed` and the database audit log.
+* **Permission Denied Errors:** If the Janitor encounters a permissions error and fails to remove a directory during a `--purge` operation (via `fs::remove_dir_all`), it warns via standard logging. However, it currently **still** includes the full directory size in the reported `bytes_reclaimed` and the database audit log.
 
 ```
 
