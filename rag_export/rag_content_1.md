@@ -561,7 +561,7 @@ $ rustodian janitor example-rust-app --purge
 
 ## Directory Traversal (`ignore` vs `walkdir`)
 
-Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` to respect `.gitignore` and `.ignore` rules automatically. Without this, scanning would waste substantial I/O stat calls descending into large, irrelevant build artifact folders. By automatically skipping directories like `node_modules/` (Node) or `target/` (Rust), `ignore` prevents traversing tens of thousands of generated files. This avoids severe performance bottlenecks, focusing discovery entirely on tracked source code.
+Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` to respect `.gitignore` and `.ignore` rules automatically. Without this, scanning would waste substantial I/O stat calls descending into large, irrelevant build artifact folders. For example, if a `.gitignore` specifies `node_modules/`, `ignore` reads this rule and immediately skips the directory, preventing thousands of wasted stat calls on generated files. `walkdir`, lacking built-in Git support, would blindly traverse them. This avoids severe performance bottlenecks, focusing discovery entirely on tracked source code.
 
 ## Recursion Limits
 
@@ -569,7 +569,7 @@ Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir`
 
 ## Language Detection and Polyglot Projects
 
-Language detection utilizes pure functions (like `detect_rust`) to evaluate directories for specific marker files. Detectors are evaluated independently. When a directory contains competing manifests (e.g., both `Cargo.toml` and `package.json`), Rustodian recognizes a polyglot project. It yields independent, High-confidence detections for both languages, without reducing the confidence level of either.
+Language detection utilizes pure functions (like `detect_rust`) to evaluate directories for specific marker files. Detectors are evaluated independently. In edge cases where a directory contains multiple competing manifests (e.g., both `Cargo.toml` and `package.json`), Rustodian correctly identifies a polyglot project. It yields independent, `DetectionConfidence::High` detections for all matched languages simultaneously, without penalizing or reducing the confidence level of any individual detection.
 
 ### Markers and Confidence Rules
 
@@ -594,7 +594,7 @@ The `DetectionConfidence` enum reflects evidence strength:
 
 Every scan (`Custodian::scan`) performs a self-healing garbage collection pass. If a tracked project's path no longer exists on disk, Rustodian purges it from the database.
 
-Crucially, dependent tables handle cascading deletions. The `project_logs` (which stores audit history) and `project_languages` tables define foreign keys referencing `projects(id)` with `ON DELETE CASCADE`. When the scan drops a missing project, SQLite automatically cascade-deletes all its associated languages and audit logs. This prevents orphaned records, keeping the schema clean and self-correcting without manual intervention.
+Crucially, dependent tables handle cascading deletions. The `project_logs` (storing audit history) and `project_languages` tables define foreign keys referencing `projects(id)` with `ON DELETE CASCADE`. When the orchestrator deletes a missing project's row, SQLite immediately and automatically cascade-deletes all associated audit logs and language records. This completely prevents orphaned historical data, ensuring the database schema remains clean and self-correcting without manual intervention.
 
 ```
 
