@@ -748,7 +748,7 @@ jobs:
       SLINT_BACKEND: headless
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - name: Install dependencies (Linux)
