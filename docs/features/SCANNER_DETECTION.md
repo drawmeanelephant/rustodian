@@ -2,37 +2,37 @@
 
 ## Directory Traversal (`ignore` vs `walkdir`)
 
-Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` to respect `.gitignore` and `.ignore` rules automatically. Without this, scanning would waste substantial I/O stat calls descending into large, irrelevant build artifact folders. By automatically skipping directories like `node_modules/` (Node) or `target/` (Rust), `ignore` prevents traversing tens of thousands of generated files. This avoids severe performance bottlenecks, focusing discovery entirely on tracked source code.
+Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir` to automatically respect `.gitignore` and `.ignore` rules. Standard traversal requires manual rule parsing or exhaustive tree visiting. By honoring native ignore files out-of-the-box, Rustodian avoids descending into massive, irrelevant artifact directories. For example, if a `.gitignore` contains `node_modules/`, `ignore` silently skips it, saving thousands of wasteful I/O stat calls. This ensures traversal focuses exclusively on tracked source files and mitigates severe performance bottlenecks.
 
 ## Recursion Limits
 
-`ScanConfig.max_depth` limits recursion depth. Scanning deeply nested monorepos can cause prohibitively long execution times. Enforcing a maximum depth restricts scan time while still capturing typical project structures. A depth of `0` halts traversal immediately.
+`ScanConfig.max_depth` limits recursion depth. Unbounded traversal of deep monorepos can trigger prohibitive execution times. Enforcing a strict depth bounds scan duration while capturing standard project hierarchies. A depth of `0` halts traversal immediately.
 
 ## Language Detection and Polyglot Projects
 
-Language detection utilizes pure functions (like `detect_rust`) to evaluate directories for specific marker files. Detectors are evaluated independently. When a directory contains competing manifests (e.g., both `Cargo.toml` and `package.json`), Rustodian recognizes a polyglot project. It yields independent, High-confidence detections for both languages, without reducing the confidence level of either.
+Language detection evaluates directories independently using pure functions (e.g., `detect_rust`) that scan for known marker files. If a directory contains competing manifests (e.g., both `Cargo.toml` and `package.json`), Rustodian identifies a polyglot project. It yields independent detections for both languages at full confidence, without diluting the `DetectionConfidence` for either.
 
 ### Markers and Confidence Rules
 
 | Language | Marker File(s) | Confidence Rules |
 |----------|----------------|------------------|
 | **Rust** | `Cargo.toml`, `Cargo.lock` | **High:** `Cargo.toml` exists. **Medium:** Only `Cargo.lock` exists. |
-| **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only a lockfile or `requirements.txt` exists. |
-| **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Any marker matched (always High, even with just lockfiles). |
-| **Go**   | `go.mod`, `go.sum` | **High:** Any marker matched (always High, even with just lockfiles). |
+| **Python**| `pyproject.toml`, `setup.py`, `setup.cfg`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements.txt` | **High:** Manifest (`pyproject.toml`, `setup.py`, `setup.cfg`) exists. **Medium:** Only lockfiles or `requirements.txt` exist. |
+| **Node** | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` | **High:** Any marker matched. |
+| **Go**   | `go.mod`, `go.sum` | **High:** Any marker matched. |
 | **Ruby** | `Gemfile`, `*.gemspec`, `Gemfile.lock` | **High:** `Gemfile` or `*.gemspec` exists. **Medium:** Only `Gemfile.lock` exists. |
 | **Zig**  | `build.zig`, `build.zig.zon` | **High:** `build.zig` exists. **Medium:** Only `build.zig.zon` exists. |
 
 ## Detection Confidence Levels
 
-The `DetectionConfidence` enum reflects evidence strength:
+The `DetectionConfidence` enum maps evidence strength:
 
-- **High:** A definitive manifest exists (e.g., `Cargo.toml`, `package.json`), indicating a project root. For Node and Go, any marker (even just a lockfile) yields High confidence.
-- **Medium:** Supporting evidence exists, but isn't definitive. Examples include a `Cargo.lock` without a `Cargo.toml` (potentially a sub-crate) or a standalone `requirements.txt`.
-- **Low:** Weak signals (e.g., only file extensions). Currently unused, reserved for future heuristics.
+- **High:** A definitive manifest exists (e.g., `Cargo.toml`, `package.json`), anchoring a project root. For Node and Go, discovering just a lockfile provides High confidence.
+- **Medium:** Supporting evidence exists without a definitive manifest. Examples include a lone `Cargo.lock` (a potential sub-crate) or a standalone `requirements.txt`.
+- **Low:** Weak signals (e.g., extensions). Currently reserved for future heuristics.
 
 ## Self-Healing Garbage Collection
 
-Every scan (`Custodian::scan`) performs a self-healing garbage collection pass. If a tracked project's path no longer exists on disk, Rustodian purges it from the database.
+Every scan (`Custodian::scan`) performs a self-healing garbage collection pass. If a tracked project's path no longer exists on disk, Rustodian purges it from the datastore.
 
-Crucially, dependent tables handle cascading deletions. The `project_logs` (which stores audit history) and `project_languages` tables define foreign keys referencing `projects(id)` with `ON DELETE CASCADE`. When the scan drops a missing project, SQLite automatically cascade-deletes all its associated languages and audit logs. This prevents orphaned records, keeping the schema clean and self-correcting without manual intervention.
+This purge naturally propagates via SQLite `ON DELETE CASCADE` foreign keys attached to the `project_languages` and `project_logs` tables. Thus, when the core `projects` record is deleted, all dependent language metadata, audit history, and execution logs are cascade-deleted simultaneously. This ensures no orphaned logs remain, keeping the relational schema perfectly clean without manual bookkeeping.
