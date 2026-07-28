@@ -84,6 +84,15 @@ fn test_janitor() {
     let target_dir = proj_dir.join("target");
     fs::create_dir(&target_dir).unwrap();
     fs::write(target_dir.join("dummy.txt"), "dummy").unwrap();
+    let build_dir = proj_dir.join("build");
+    fs::create_dir(&build_dir).unwrap();
+    fs::write(build_dir.join("keep.txt"), "keep").unwrap();
+    let dist_dir = proj_dir.join("dist");
+    fs::create_dir(&dist_dir).unwrap();
+    fs::write(dist_dir.join("keep.txt"), "keep").unwrap();
+    let node_modules_dir = proj_dir.join("node_modules");
+    fs::create_dir(&node_modules_dir).unwrap();
+    fs::write(node_modules_dir.join("keep.txt"), "keep").unwrap();
 
     // 1. Scan
     let mut cmd = Command::cargo_bin("rustodian").unwrap();
@@ -102,12 +111,32 @@ fn test_janitor() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("target"))
-        .stdout(predicate::str::contains("Reclaimable (Dry Run)"));
+        .stdout(predicate::str::contains("reclaimable"))
+        .stdout(predicate::str::contains("5 B"));
 
     // verify file still exists
     assert!(target_dir.join("dummy.txt").exists());
+    assert!(build_dir.exists());
+    assert!(dist_dir.exists());
+    assert!(node_modules_dir.exists());
 
-    // 3. Janitor purge
+    // 3. Structured JSON output exposes raw size values.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    let output = cmd
+        .env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("janitor")
+        .arg("my-rust-proj")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["targets"][0]["target"], "target");
+    assert_eq!(json["targets"][0]["outcome"], "reclaimable");
+    assert_eq!(json["targets"][0]["size_bytes"], 5);
+
+    // 4. Janitor purge
     let mut cmd = Command::cargo_bin("rustodian").unwrap();
     cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
         .arg("janitor")
@@ -116,8 +145,94 @@ fn test_janitor() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("target"))
-        .stdout(predicate::str::contains("Reclaimed"));
+        .stdout(predicate::str::contains("removed"));
 
-    // verify file is deleted
+    // Eligible cleanup is deleted; ambiguous and language-ineligible directories stay.
     assert!(!target_dir.exists());
+    assert!(build_dir.exists());
+    assert!(dist_dir.exists());
+    assert!(node_modules_dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_janitor_refuses_symlink_target() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new().unwrap();
+    let project = dir.path().join("my-rust-proj");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("Cargo.toml"), "[package]").unwrap();
+    let outside = TempDir::new().unwrap();
+    let outside_file = outside.path().join("must-survive.txt");
+    fs::write(&outside_file, "safe").unwrap();
+    symlink(outside.path(), project.join("target")).unwrap();
+
+    scan_project(dir.path(), "test.db");
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("janitor")
+        .arg("my-rust-proj")
+        .arg("--purge");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("skipped"))
+        .stdout(predicate::str::contains("symbolic link"));
+
+    assert!(
+        project
+            .join("target")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(outside_file.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_janitor_reports_partial_purge_failure() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let project = dir.path().join("mixed-project");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("Cargo.toml"), "[package]").unwrap();
+    fs::write(project.join("pyproject.toml"), "").unwrap();
+    let target = project.join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("removed.txt"), "removed").unwrap();
+    let venv = project.join(".venv");
+    fs::create_dir(&venv).unwrap();
+    fs::write(venv.join("locked.txt"), "not reclaimed").unwrap();
+
+    scan_project(dir.path(), "test.db");
+    fs::set_permissions(&venv, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("janitor")
+        .arg("mixed-project")
+        .arg("--purge");
+    cmd.assert()
+        .failure()
+        .stdout(predicate::str::contains("target"))
+        .stdout(predicate::str::contains(".venv"))
+        .stdout(predicate::str::contains("removed"))
+        .stdout(predicate::str::contains("failed"));
+
+    assert!(!target.exists());
+    assert!(venv.exists());
+    fs::set_permissions(&venv, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn scan_project(root: &std::path::Path, db_name: &str) {
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", root.join(db_name))
+        .arg("scan")
+        .arg("--path")
+        .arg(root);
+    cmd.assert().success();
 }
