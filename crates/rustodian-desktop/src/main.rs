@@ -332,7 +332,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 ui.set_janitor_status(
                                     format!(
                                         "Inspection complete. Found {} targets.",
-                                        report.targets_found.len()
+                                        report.targets.len()
                                     )
                                     .into(),
                                 );
@@ -340,7 +340,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 ui.set_janitor_status(
                                     format!(
                                         "Purged {} targets successfully.",
-                                        report.targets_found.len()
+                                        report.targets.len()
                                     )
                                     .into(),
                                 );
@@ -348,7 +348,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                 let _ = write!(
                                     logs,
                                     "\n[Janitor] Purged targets: {:?}. Space reclaimed: {formatted_size}\n",
-                                    report.targets_found
+                                    report
+                                        .targets
+                                        .iter()
+                                        .map(|target| target.target.clone())
+                                        .collect::<Vec<_>>()
                                 );
                                 ui.set_stream_logs(logs.into());
                             }
