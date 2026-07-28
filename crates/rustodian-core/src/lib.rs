@@ -13,6 +13,7 @@
 //! - [`error`] — Domain error types
 
 pub mod bootstrapper;
+pub mod brief;
 pub mod custodian;
 pub mod error;
 pub mod janitor;
@@ -21,6 +22,9 @@ pub mod runner;
 pub mod traits;
 
 pub use bootstrapper::ProjectBootstrapper;
+pub use brief::{
+    AttentionReason, BriefCategory, BriefCounts, BriefReport, ProjectBrief, SuggestedAction,
+};
 pub use custodian::Custodian;
 pub use error::CoreError;
 pub use janitor::DigitalJanitor;

@@ -67,6 +67,10 @@ impl Custodian {
         self.store.as_ref()
     }
 
+    pub(crate) fn git_inspector(&self) -> &dyn GitInspector {
+        self.git.as_ref()
+    }
+
     /// Scan a directory tree for projects and store the results.
     #[instrument(skip(self), fields(root = %root.display()))]
     pub fn scan(&self, root: &Path, config: &ScanConfig) -> Result<ScanReport, CoreError> {
