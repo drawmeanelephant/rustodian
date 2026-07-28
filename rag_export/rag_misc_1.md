@@ -50,9 +50,40 @@ CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
 
 ```
 
-### Path: ./.github/CODEOWNERS
+### Path: ./crates/rustodian-desktop/src/snapshots/rustodian_desktop__markdown__tests__parse_markdown_commands.snap
 ```
-* @drawmeanelephant
+---
+source: crates/rustodian-desktop/src/markdown.rs
+expression: parse_markdown(input)
+---
+[
+    Header {
+        level: 2,
+        text: "Commands",
+    },
+    CodeFence {
+        text: "cargo test",
+    },
+]
+
+```
+
+### Path: ./crates/rustodian-desktop/src/snapshots/rustodian_desktop__markdown__tests__parse_markdown_tasks.snap
+```
+---
+source: crates/rustodian-desktop/src/markdown.rs
+expression: parse_markdown(input)
+---
+[
+    Task {
+        text: "task one",
+        checked: false,
+    },
+    Task {
+        text: "task two",
+        checked: true,
+    },
+]
 
 ```
 
@@ -630,40 +661,9 @@ export component PipelineWindow inherits Window {
 
 ```
 
-### Path: ./crates/rustodian-desktop/src/snapshots/rustodian_desktop__markdown__tests__parse_markdown_commands.snap
+### Path: ./.github/CODEOWNERS
 ```
----
-source: crates/rustodian-desktop/src/markdown.rs
-expression: parse_markdown(input)
----
-[
-    Header {
-        level: 2,
-        text: "Commands",
-    },
-    CodeFence {
-        text: "cargo test",
-    },
-]
-
-```
-
-### Path: ./crates/rustodian-desktop/src/snapshots/rustodian_desktop__markdown__tests__parse_markdown_tasks.snap
-```
----
-source: crates/rustodian-desktop/src/markdown.rs
-expression: parse_markdown(input)
----
-[
-    Task {
-        text: "task one",
-        checked: false,
-    },
-    Task {
-        text: "task two",
-        checked: true,
-    },
-]
+* @drawmeanelephant
 
 ```
 
