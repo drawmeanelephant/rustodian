@@ -228,6 +228,7 @@ fn test_janitor_reports_partial_purge_failure() {
     fs::set_permissions(&venv, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+#[cfg(unix)]
 fn scan_project(root: &std::path::Path, db_name: &str) {
     let mut cmd = Command::cargo_bin("rustodian").unwrap();
     cmd.env("RUSTODIAN_DB", root.join(db_name))
