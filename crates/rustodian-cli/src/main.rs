@@ -74,6 +74,12 @@ enum Commands {
     /// Show observatory status summary
     Status,
 
+    /// Summarize which tracked projects need attention
+    Brief {
+        /// Project name or ID
+        project: Option<String>,
+    },
+
     /// Manage remote GitHub projects
     Remote {
         #[command(subcommand)]
@@ -182,6 +188,9 @@ fn main() -> Result<()> {
             commands::list::execute(&custodian, language.as_deref(), &cli.format)
         }
         Commands::Status => commands::status::execute(&custodian, &cli.format),
+        Commands::Brief { project } => {
+            commands::brief::execute(&custodian, project.as_deref(), &cli.format)
+        }
         Commands::Remote { command } => match command {
             RemoteCommands::Add {
                 repo_slug,

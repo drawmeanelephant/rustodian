@@ -1,4 +1,5 @@
 //! CLI command implementations.
+pub mod brief;
 pub mod config;
 
 pub mod info;
