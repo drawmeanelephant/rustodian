@@ -14,10 +14,13 @@ When downloading an archive, `GithubDownloader` requests the `main` branch tarba
 Extracting untrusted archives carries "Zip Slip" risks, where malicious entries use path traversal (`../`) or symlinks to overwrite files outside the intended directory.
 
 To mitigate this, the downloader implements strict protections:
-1. **Component Verification:** Extraction is rejected if any path component is not a normal file/directory or the current directory (`.`). `..` components trigger an immediate security error.
-2. **Prefix Stripping:** Top-level archive directories are discarded via component iterator manipulation (`strip_prefix`) to prevent unnecessary nesting.
-3. **Canonicalization Checks:** It uses `canonicalize` on the target directory parent of each entry, strictly validating that the resolved extraction path begins exactly with the intended extraction root.
-4. **Symlink Mitigation:** If an archive contains a symlink pointing outside the root and a subsequent entry attempts to write to it, the canonicalization check intercepts the operation and aborts extraction, preventing arbitrary file overwrites.
+1. **Entry Type Refusal:** Only regular files and directories may be extracted. Any symbolic link or hard link entry rejects the entire archive up front — before anything is written — and exotic entry types (FIFOs, devices, etc.) are refused the same way.
+2. **Component Verification:** Extraction is rejected if any path component is not a normal file/directory or the current directory (`.`). `..` components trigger an immediate security error.
+3. **Prefix Stripping:** Top-level archive directories are discarded via component iterator manipulation (`strip_prefix`) to prevent unnecessary nesting.
+4. **Canonical Destination:** The destination directory is created if needed and canonicalized exactly once before extraction; a failure to resolve it is a hard error, and extraction never falls back to an uncanonicalized path.
+5. **Canonicalization Checks:** For each entry, the target directory parent is canonicalized and strictly validated to begin exactly with the resolved extraction root, defending against pre-existing symlinks in the destination.
+
+The combination means a single link entry in an archive aborts the whole extraction, so a symlink can never be created first and then followed by a nested entry to write outside the destination.
 
 ## Preserve Patterns
 To prevent overwriting local configurations or files when refreshing an archive, the downloader supports a `preserve_patterns` glob mechanism. During extraction, each archive entry's stripped path is matched against a compiled `globset`. If an entry matches a preserve pattern (e.g., `config.json`, `*.local`), it is safely skipped, leaving the local file intact.
