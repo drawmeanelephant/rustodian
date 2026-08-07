@@ -75,6 +75,42 @@ custom-cmd = "echo hello world"
 }
 
 #[test]
+fn test_run_failing_command_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    let proj_dir = dir.path().join("my-failing-proj");
+    fs::create_dir(&proj_dir).unwrap();
+    fs::write(proj_dir.join("package.json"), "{}").unwrap();
+    fs::write(
+        proj_dir.join(".rustodian.toml"),
+        r#"[commands]
+fail = "echo 'boom' && exit 42"
+"#,
+    )
+    .unwrap();
+
+    // 1. Scan
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("scan")
+        .arg("--path")
+        .arg(dir.path());
+    cmd.assert().success();
+
+    // 2. Run the failing command: output is still captured, the CLI must exit
+    //    nonzero, and no success message may be printed.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("run")
+        .arg("my-failing-proj")
+        .arg("fail");
+    cmd.assert()
+        .failure()
+        .stdout(predicate::str::contains("boom"))
+        .stdout(predicate::str::contains("Command executed successfully.").not())
+        .stderr(predicate::str::contains("exit code 42"));
+}
+
+#[test]
 fn test_janitor() {
     let dir = TempDir::new().unwrap();
     let proj_dir = dir.path().join("my-rust-proj");
