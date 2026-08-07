@@ -273,3 +273,76 @@ fn scan_project(root: &std::path::Path, db_name: &str) {
         .arg(root);
     cmd.assert().success();
 }
+
+#[test]
+fn test_brief_ignores_janitor_logs_for_health() {
+    let dir = TempDir::new().unwrap();
+    let proj_dir = dir.path().join("my-js-proj");
+    fs::create_dir(&proj_dir).unwrap();
+    fs::write(
+        proj_dir.join("package.json"),
+        r#"{"name": "my-js-proj", "scripts": {"start": "echo hi"}}"#,
+    )
+    .unwrap();
+    // A shell-metacharacter command forces use_shell, so `echo boom && exit 1`
+    // runs in sh/cmd and records exit code 1.
+    fs::write(
+        proj_dir.join(".rustodian.toml"),
+        "[commands]\ntest = \"echo boom && exit 1\"\n",
+    )
+    .unwrap();
+
+    // 1. Scan
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("scan")
+        .arg("--path")
+        .arg(dir.path());
+    cmd.assert().success();
+
+    // 2. Run the failing test -> logs "test" with exit code 1. The run
+    //    command itself now exits nonzero when the child command fails.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("run")
+        .arg("my-js-proj")
+        .arg("test");
+    cmd.assert()
+        .failure()
+        .stdout(predicate::str::contains("boom"));
+
+    // 3. Janitor purge writes a `janitor:clean` log after the failed test
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("janitor")
+        .arg("my-js-proj")
+        .arg("--purge");
+    cmd.assert().success();
+
+    // 4. Brief must still classify by the failed test, not the janitor log
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    let output = cmd
+        .env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("brief")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["projects"][0]["category"], "needs_attention");
+    assert_eq!(
+        json["projects"][0]["latest_command"]["command_name"],
+        "test"
+    );
+    assert_eq!(json["projects"][0]["latest_command"]["exit_code"], 1);
+
+    // 5. The logs command still surfaces janitor logs
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("logs")
+        .arg("my-js-proj");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("janitor:clean"));
+}

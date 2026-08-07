@@ -115,7 +115,10 @@ impl Custodian {
             let logs = self.store().list_logs(&project.id.to_string(), 50)?;
             let latest_command = logs
                 .into_iter()
-                .filter(|log| !log.command_name.trim().is_empty())
+                .filter(|log| {
+                    !log.command_name.trim().is_empty()
+                        && !is_housekeeping_log(log.command_name.trim())
+                })
                 .max_by_key(|log| log.run_at);
 
             let mut reasons = Vec::new();
@@ -209,6 +212,15 @@ impl Custodian {
             });
         }
 
+        // Deterministic ordering: category precedence, then latest health
+        // activity descending, then project name to break ties.
+        records.sort_by(|a, b| {
+            category_rank(&a.category)
+                .cmp(&category_rank(&b.category))
+                .then_with(|| latest_activity_at(b).cmp(&latest_activity_at(a)))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
         let mut counts = BriefCounts::default();
         for record in &records {
             match record.category {
@@ -231,6 +243,28 @@ fn git_error_was_present(reasons: &[AttentionReason]) -> bool {
     reasons
         .iter()
         .any(|reason| matches!(reason, AttentionReason::GitInspectionFailed { .. }))
+}
+
+/// Housekeeping logs (e.g. `janitor:clean`) record cleanup bookkeeping rather
+/// than project health and are ignored when picking the latest command.
+fn is_housekeeping_log(command_name: &str) -> bool {
+    command_name.starts_with("janitor:")
+}
+
+/// Category precedence used to order report projects: Needs Attention first,
+/// then Work in Progress, Ready, and finally Unverified.
+fn category_rank(category: &BriefCategory) -> u8 {
+    match category {
+        BriefCategory::NeedsAttention => 0,
+        BriefCategory::WorkInProgress => 1,
+        BriefCategory::Ready => 2,
+        BriefCategory::Unverified => 3,
+    }
+}
+
+/// Timestamp of the latest health-relevant command, if any.
+fn latest_activity_at(record: &ProjectBrief) -> Option<DateTime<Utc>> {
+    record.latest_command.as_ref().map(|log| log.run_at)
 }
 
 #[cfg(test)]
@@ -328,10 +362,10 @@ mod tests {
             Err(CoreError::Internal("unused".into()))
         }
     }
-    fn project(path: &Path) -> Project {
+    fn project_named(path: &Path, name: &str) -> Project {
         Project {
             id: ProjectId::new(),
-            name: "demo".into(),
+            name: name.into(),
             path: path.into(),
             languages: vec![],
             vcs: None,
@@ -340,15 +374,26 @@ mod tests {
             metadata: rustodian_types::ProjectMetadata::default(),
         }
     }
-    fn log(project: &Project, exit_code: Option<i32>) -> ProjectLog {
+    fn project(path: &Path) -> Project {
+        project_named(path, "demo")
+    }
+    fn log_named(
+        project: &Project,
+        command_name: &str,
+        exit_code: Option<i32>,
+        run_at: DateTime<Utc>,
+    ) -> ProjectLog {
         ProjectLog {
             id: "log".into(),
             project_id: project.id.to_string(),
-            command_name: "test".into(),
+            command_name: command_name.into(),
             exit_code,
             log_text: String::new(),
-            run_at: Utc::now(),
+            run_at,
         }
+    }
+    fn log(project: &Project, exit_code: Option<i32>) -> ProjectLog {
+        log_named(project, "test", exit_code, Utc::now())
     }
     fn custodian(project: Project, logs: Vec<ProjectLog>, git: GitResult) -> Custodian {
         Custodian::new(
@@ -441,5 +486,134 @@ mod tests {
             report.projects[0].suggested_action,
             Some(SuggestedAction::RefreshTrackedProjects)
         ));
+    }
+
+    #[test]
+    fn failed_test_is_not_masked_by_later_janitor_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let failed = project(dir.path());
+        let logs = vec![
+            log_named(
+                &failed,
+                "test",
+                Some(1),
+                now - chrono::TimeDelta::minutes(5),
+            ),
+            log_named(&failed, "janitor:clean", Some(0), now),
+        ];
+        let report = custodian(failed.clone(), logs, GitResult::Vcs(false))
+            .brief(vec![failed])
+            .unwrap();
+        let brief = &report.projects[0];
+        assert_eq!(brief.category, BriefCategory::NeedsAttention);
+        assert_eq!(brief.latest_command.as_ref().unwrap().command_name, "test");
+        assert_eq!(brief.latest_command.as_ref().unwrap().exit_code, Some(1));
+        assert!(
+            brief
+                .attention_reasons
+                .iter()
+                .any(|reason| matches!(reason, AttentionReason::LatestCommandFailed { .. }))
+        );
+    }
+
+    #[test]
+    fn successful_test_stays_ready_after_janitor_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let passing = project(dir.path());
+        let logs = vec![
+            log_named(
+                &passing,
+                "test",
+                Some(0),
+                now - chrono::TimeDelta::minutes(5),
+            ),
+            log_named(&passing, "janitor:clean", Some(0), now),
+        ];
+        let report = custodian(passing.clone(), logs, GitResult::Vcs(false))
+            .brief(vec![passing])
+            .unwrap();
+        let brief = &report.projects[0];
+        assert_eq!(brief.category, BriefCategory::Ready);
+        assert_eq!(brief.latest_command.as_ref().unwrap().command_name, "test");
+    }
+
+    #[test]
+    fn janitor_only_history_is_unverified() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = project(dir.path());
+        let logs = vec![log_named(&p, "janitor:clean", Some(0), Utc::now())];
+        let report = custodian(p.clone(), logs, GitResult::Vcs(false))
+            .brief(vec![p])
+            .unwrap();
+        let brief = &report.projects[0];
+        assert_eq!(brief.category, BriefCategory::Unverified);
+        assert!(brief.latest_command.is_none());
+        assert!(
+            brief
+                .attention_reasons
+                .iter()
+                .any(|reason| matches!(reason, AttentionReason::NoCommandHistory))
+        );
+    }
+
+    #[test]
+    fn bootstrap_and_verify_logs_remain_health_relevant() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let p = project(dir.path());
+        let logs = vec![
+            log_named(
+                &p,
+                "bootstrap:rust",
+                Some(0),
+                now - chrono::TimeDelta::minutes(5),
+            ),
+            log_named(&p, "verify:rust", Some(1), now),
+        ];
+        let report = custodian(p.clone(), logs, GitResult::Vcs(false))
+            .brief(vec![p])
+            .unwrap();
+        let brief = &report.projects[0];
+        assert_eq!(brief.category, BriefCategory::NeedsAttention);
+        assert_eq!(
+            brief.latest_command.as_ref().unwrap().command_name,
+            "verify:rust"
+        );
+    }
+
+    #[test]
+    fn brief_ordering_is_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let now = Utc::now();
+
+        let needs = project_named(base, "needs");
+        let beta = project_named(base, "beta");
+        let alpha = project_named(base, "alpha");
+        let zeta = project_named(base, "zeta");
+        let empty = project_named(base, "empty");
+
+        let logs = vec![
+            log_named(&needs, "test", Some(1), now),
+            log_named(&beta, "test", Some(0), now + chrono::TimeDelta::seconds(1)),
+            log_named(&alpha, "test", Some(0), now),
+            log_named(&zeta, "test", Some(0), now),
+        ];
+        let report = custodian(needs.clone(), logs, GitResult::Vcs(false))
+            .brief(vec![zeta, needs, empty, beta, alpha])
+            .unwrap();
+        let names: Vec<&str> = report.projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["needs", "beta", "alpha", "zeta", "empty"]);
+
+        // JSON stays structured and reflects the deterministic order.
+        let json = serde_json::to_value(&report).unwrap();
+        assert!(json["projects"].is_array());
+        assert!(json["category_counts"]["ready"].is_number());
+        assert_eq!(json["projects"][0]["category"], "needs_attention");
+        assert_eq!(json["projects"][1]["name"], "beta");
+        assert_eq!(json["projects"][3]["name"], "zeta");
+        assert_eq!(json["projects"][4]["name"], "empty");
     }
 }
