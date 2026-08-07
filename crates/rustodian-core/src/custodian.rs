@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 use rustodian_types::{Project, ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord};
 
@@ -83,7 +83,21 @@ impl Custodian {
         let mut projects_updated = 0;
 
         for d in &discovered {
-            let vcs = self.git.inspect(&d.path)?;
+            // A single malformed, inaccessible, or otherwise broken repository
+            // must not prevent unrelated projects from being indexed. Log the
+            // failure and store the project without VCS info instead of
+            // aborting the whole scan.
+            let vcs = match self.git.inspect(&d.path) {
+                Ok(vcs) => vcs,
+                Err(err) => {
+                    warn!(
+                        path = %d.path.display(),
+                        error = %err,
+                        "Git inspection failed; indexing project without VCS info"
+                    );
+                    None
+                }
+            };
             let now = chrono::Utc::now();
 
             let project = if let Some(mut existing) = self.store.find_by_path(&d.path)? {
@@ -346,7 +360,9 @@ mod tests {
         CommandRunner, DiscoveredProject, GitInspector, ProjectScanner, ProjectStore,
         RunningProcess,
     };
-    use rustodian_types::{ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord, VcsInfo};
+    use rustodian_types::{
+        ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord, VcsInfo, VcsType,
+    };
     use std::path::Path;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -693,5 +709,190 @@ mod tests {
 
         // A process that never spawned has nothing to log.
         assert!(saved_logs.lock().unwrap().is_empty());
+    }
+
+    // ── scan resilience: per-project git inspection failures ─────────────
+
+    /// Scanner that returns a fixed set of discovered projects.
+    struct FixedScanner {
+        discovered: Vec<DiscoveredProject>,
+    }
+
+    impl ProjectScanner for FixedScanner {
+        fn scan(
+            &self,
+            _root: &Path,
+            _config: &ScanConfig,
+        ) -> Result<Vec<DiscoveredProject>, CoreError> {
+            Ok(self.discovered.clone())
+        }
+    }
+
+    /// Git inspector that fails for one specific path and succeeds elsewhere.
+    struct SelectiveGit {
+        failing_path: PathBuf,
+    }
+
+    impl GitInspector for SelectiveGit {
+        fn inspect(&self, path: &Path) -> Result<Option<VcsInfo>, CoreError> {
+            if path == self.failing_path {
+                Err(CoreError::Git("corrupt repository".to_string()))
+            } else {
+                Ok(Some(VcsInfo {
+                    vcs_type: VcsType::Git,
+                    branch: Some("main".to_string()),
+                    remote_url: None,
+                    is_dirty: false,
+                    last_commit: None,
+                }))
+            }
+        }
+        fn get_dirty_files(&self, _project_path: &Path) -> Result<Vec<PathBuf>, CoreError> {
+            Ok(vec![])
+        }
+    }
+
+    /// Store that records every saved project and can fail on demand.
+    struct RecordingScanStore {
+        saved: Arc<Mutex<Vec<Project>>>,
+        fail_save: bool,
+    }
+
+    impl ProjectStore for RecordingScanStore {
+        fn save_project(&self, project: &Project) -> Result<ProjectId, CoreError> {
+            if self.fail_save {
+                return Err(CoreError::Storage("injected storage failure".to_string()));
+            }
+            self.saved.lock().unwrap().push(project.clone());
+            Ok(project.id.clone())
+        }
+        fn get_project(&self, _id: &ProjectId) -> Result<Option<Project>, CoreError> {
+            Ok(None)
+        }
+        fn list_projects(&self) -> Result<Vec<Project>, CoreError> {
+            Ok(vec![])
+        }
+        fn delete_project(&self, _id: &ProjectId) -> Result<bool, CoreError> {
+            Ok(true)
+        }
+        fn find_by_path(&self, _path: &Path) -> Result<Option<Project>, CoreError> {
+            Ok(None)
+        }
+        fn save_scan(&self, _scan: &ScanRecord) -> Result<ScanId, CoreError> {
+            Ok(ScanId::new())
+        }
+        fn get_latest_scan(&self) -> Result<Option<ScanRecord>, CoreError> {
+            Ok(None)
+        }
+        fn save_log(&self, _log: &ProjectLog) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn list_logs(
+            &self,
+            _project_id: &str,
+            _limit: usize,
+        ) -> Result<Vec<ProjectLog>, CoreError> {
+            Ok(vec![])
+        }
+        fn get_log(&self, _id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn get_latest_log(&self, _project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn prune_logs(&self, _project_id: &str, _limit: usize) -> Result<usize, CoreError> {
+            Ok(0)
+        }
+    }
+
+    fn discovered_project(name: &str) -> DiscoveredProject {
+        DiscoveredProject {
+            name: name.to_string(),
+            path: PathBuf::from(format!("/projects/{name}")),
+            languages: vec![],
+            commands: vec![],
+        }
+    }
+
+    #[test]
+    fn test_scan_indexes_project_without_vcs_when_git_inspection_fails() {
+        let good = discovered_project("good");
+        let broken = discovered_project("broken");
+
+        let saved = Arc::new(Mutex::new(Vec::new()));
+        let store = RecordingScanStore {
+            saved: saved.clone(),
+            fail_save: false,
+        };
+        let scanner = FixedScanner {
+            discovered: vec![good.clone(), broken.clone()],
+        };
+        let git = SelectiveGit {
+            failing_path: broken.path.clone(),
+        };
+
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(scanner),
+            Box::new(git),
+            Box::new(DefaultCommandRunner),
+        );
+
+        let report = custodian
+            .scan(Path::new("/projects"), &ScanConfig::default())
+            .expect("scan should complete despite git inspection failure");
+
+        // Both projects count toward the report as discovered/new.
+        assert_eq!(report.projects_found, 2);
+        assert_eq!(report.projects_new, 2);
+
+        let saved = saved.lock().unwrap();
+        assert_eq!(saved.len(), 2, "both projects must be saved");
+
+        let saved_broken = saved
+            .iter()
+            .find(|p| p.path == broken.path)
+            .expect("broken project should still be saved");
+        assert!(
+            saved_broken.vcs.is_none(),
+            "broken project must be indexed with vcs: None"
+        );
+
+        let saved_good = saved
+            .iter()
+            .find(|p| p.path == good.path)
+            .expect("good project should be saved");
+        assert!(
+            saved_good.vcs.is_some(),
+            "successfully inspected project must keep its VCS info"
+        );
+    }
+
+    #[test]
+    fn test_scan_storage_failure_aborts_operation() {
+        let store = RecordingScanStore {
+            saved: Arc::new(Mutex::new(Vec::new())),
+            fail_save: true,
+        };
+        let scanner = FixedScanner {
+            discovered: vec![discovered_project("a"), discovered_project("b")],
+        };
+
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(scanner),
+            Box::new(SelectiveGit {
+                failing_path: PathBuf::from("/nonexistent"),
+            }),
+            Box::new(DefaultCommandRunner),
+        );
+
+        let err = custodian
+            .scan(Path::new("/projects"), &ScanConfig::default())
+            .expect_err("storage failure should abort the scan");
+        assert!(matches!(
+            &err,
+            CoreError::Storage(msg) if msg.contains("injected storage failure")
+        ));
     }
 }
