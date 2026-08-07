@@ -169,14 +169,28 @@ impl Custodian {
                 ))
             })?;
 
-        self.run_and_log_command(
+        // Logging already happened inside `run_and_log_command`; the child's exit
+        // status now decides whether the overall command succeeded. Only a clean
+        // exit code of 0 counts as success — any nonzero code or termination
+        // without a code is a command failure that must propagate to the caller.
+        let exit_code = self.run_and_log_command(
             &project,
             command_name,
             &cmd.command,
             cmd.use_shell,
             HashMap::new(),
         )?;
-        Ok(())
+
+        match exit_code {
+            Some(0) => Ok(()),
+            Some(code) => Err(CoreError::CommandFailed {
+                command_name: command_name.to_string(),
+                exit_code: code,
+            }),
+            None => Err(CoreError::CommandTerminated {
+                command_name: command_name.to_string(),
+            }),
+        }
     }
 
     /// Runs a command for a project, streams output in real-time, and logs it to the database.
@@ -328,10 +342,14 @@ impl Custodian {
 mod tests {
     use super::*;
     use crate::runner::DefaultCommandRunner;
-    use crate::traits::{DiscoveredProject, GitInspector, ProjectScanner, ProjectStore};
+    use crate::traits::{
+        CommandRunner, DiscoveredProject, GitInspector, ProjectScanner, ProjectStore,
+        RunningProcess,
+    };
     use rustodian_types::{ProjectId, ProjectLog, ScanConfig, ScanId, ScanRecord, VcsInfo};
     use std::path::Path;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     struct MockStore;
     impl ProjectStore for MockStore {
@@ -441,5 +459,239 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(0));
+    }
+
+    // ── run_command exit-status propagation ───────────────────────────────
+
+    struct MockRunProcess {
+        exit_code: Option<i32>,
+    }
+
+    impl RunningProcess for MockRunProcess {
+        fn id(&self) -> u32 {
+            1234
+        }
+        fn wait(&mut self) -> Result<Option<i32>, CoreError> {
+            Ok(self.exit_code)
+        }
+        fn try_wait(&mut self) -> Result<Option<Option<i32>>, CoreError> {
+            Ok(Some(self.exit_code))
+        }
+        fn kill(&mut self) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn stdout(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>> {
+            Some(Box::new(std::io::Cursor::new("mock stdout line\n")))
+        }
+        fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync>> {
+            Some(Box::new(std::io::Cursor::new("mock stderr line\n")))
+        }
+    }
+
+    struct ExitCodeRunner {
+        exit_code: Option<i32>,
+    }
+
+    impl CommandRunner for ExitCodeRunner {
+        fn spawn(&self, _spec: CommandSpec) -> Result<Box<dyn RunningProcess>, CoreError> {
+            Ok(Box::new(MockRunProcess {
+                exit_code: self.exit_code,
+            }))
+        }
+    }
+
+    /// Store that serves one project and records every persisted log.
+    struct RecordingStore {
+        project: Project,
+        saved_logs: Arc<Mutex<Vec<ProjectLog>>>,
+    }
+
+    impl ProjectStore for RecordingStore {
+        fn save_project(&self, _project: &Project) -> Result<ProjectId, CoreError> {
+            Ok(ProjectId::new())
+        }
+        fn get_project(&self, _id: &ProjectId) -> Result<Option<Project>, CoreError> {
+            Ok(Some(self.project.clone()))
+        }
+        fn list_projects(&self) -> Result<Vec<Project>, CoreError> {
+            Ok(vec![self.project.clone()])
+        }
+        fn delete_project(&self, _id: &ProjectId) -> Result<bool, CoreError> {
+            Ok(true)
+        }
+        fn find_by_path(&self, _path: &Path) -> Result<Option<Project>, CoreError> {
+            Ok(None)
+        }
+        fn save_scan(&self, _scan: &ScanRecord) -> Result<ScanId, CoreError> {
+            Ok(ScanId::new())
+        }
+        fn get_latest_scan(&self) -> Result<Option<ScanRecord>, CoreError> {
+            Ok(None)
+        }
+        fn save_log(&self, log: &ProjectLog) -> Result<(), CoreError> {
+            self.saved_logs.lock().unwrap().push(log.clone());
+            Ok(())
+        }
+        fn list_logs(
+            &self,
+            _project_id: &str,
+            _limit: usize,
+        ) -> Result<Vec<ProjectLog>, CoreError> {
+            Ok(vec![])
+        }
+        fn get_log(&self, _id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn get_latest_log(&self, _project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn prune_logs(&self, _project_id: &str, _limit: usize) -> Result<usize, CoreError> {
+            Ok(0)
+        }
+    }
+
+    fn demo_project() -> Project {
+        Project {
+            id: ProjectId::new(),
+            name: "demo-project".to_string(),
+            path: PathBuf::from("."),
+            languages: vec![],
+            vcs: None,
+            discovered_at: chrono::Utc::now(),
+            last_scanned_at: None,
+            metadata: rustodian_types::ProjectMetadata {
+                commands: vec![rustodian_types::ProjectCommand {
+                    name: "demo-cmd".to_string(),
+                    description: None,
+                    command: "mock-command".to_string(),
+                    source: ".rustodian.toml".to_string(),
+                    use_shell: true,
+                }],
+                ..Default::default()
+            },
+        }
+    }
+
+    fn run_demo_command_with_runner(
+        runner: Box<dyn CommandRunner>,
+    ) -> (Result<(), CoreError>, Arc<Mutex<Vec<ProjectLog>>>) {
+        let saved_logs = Arc::new(Mutex::new(Vec::new()));
+        let store = RecordingStore {
+            project: demo_project(),
+            saved_logs: saved_logs.clone(),
+        };
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(MockScanner),
+            Box::new(MockGit),
+            runner,
+        );
+        let result = custodian.run_command("demo-project", "demo-cmd");
+        (result, saved_logs)
+    }
+
+    fn run_demo_command(
+        exit_code: Option<i32>,
+    ) -> (Result<(), CoreError>, Arc<Mutex<Vec<ProjectLog>>>) {
+        run_demo_command_with_runner(Box::new(ExitCodeRunner { exit_code }))
+    }
+
+    #[test]
+    fn test_run_command_exit_zero_succeeds() {
+        let (result, saved_logs) = run_demo_command(Some(0));
+        assert!(result.is_ok());
+
+        let logs = saved_logs.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].command_name, "demo-cmd");
+        assert_eq!(logs[0].exit_code, Some(0));
+    }
+
+    #[test]
+    fn test_run_command_exit_one_fails() {
+        let (result, saved_logs) = run_demo_command(Some(1));
+        let err = result.unwrap_err();
+        match &err {
+            CoreError::CommandFailed {
+                command_name,
+                exit_code,
+            } => {
+                assert_eq!(command_name, "demo-cmd");
+                assert_eq!(*exit_code, 1);
+            }
+            other => panic!("expected CommandFailed, got {other:?}"),
+        }
+        assert!(err.to_string().contains("exit code 1"));
+
+        let logs = saved_logs.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].exit_code, Some(1));
+    }
+
+    #[test]
+    fn test_run_command_arbitrary_nonzero_exit_fails() {
+        let (result, saved_logs) = run_demo_command(Some(42));
+        let err = result.unwrap_err();
+        assert!(matches!(
+            &err,
+            CoreError::CommandFailed { exit_code: 42, .. }
+        ));
+        assert!(err.to_string().contains("exit code 42"));
+
+        let logs = saved_logs.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].exit_code, Some(42));
+    }
+
+    #[test]
+    fn test_run_command_termination_without_exit_code_fails() {
+        let (result, saved_logs) = run_demo_command(None);
+        let err = result.unwrap_err();
+        assert!(matches!(
+            &err,
+            CoreError::CommandTerminated { command_name }
+                if command_name == "demo-cmd"
+        ));
+
+        // The log is still persisted even though the process reported no exit code.
+        let logs = saved_logs.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].exit_code, None);
+    }
+
+    #[test]
+    fn test_run_command_captures_stdout_and_stderr() {
+        let (result, saved_logs) = run_demo_command(Some(1));
+        assert!(result.is_err());
+
+        // Output capture is unaffected by the failure: both streams land in the log.
+        let logs = saved_logs.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].log_text.contains("mock stdout line"));
+        assert!(logs[0].log_text.contains("mock stderr line"));
+    }
+
+    struct FailingSpawnRunner;
+
+    impl CommandRunner for FailingSpawnRunner {
+        fn spawn(&self, _spec: CommandSpec) -> Result<Box<dyn RunningProcess>, CoreError> {
+            Err(CoreError::Storage(
+                "Failed to spawn process: mock failure".to_string(),
+            ))
+        }
+    }
+
+    #[test]
+    fn test_run_command_spawn_failure_propagates_unchanged() {
+        let (result, saved_logs) = run_demo_command_with_runner(Box::new(FailingSpawnRunner));
+        let err = result.unwrap_err();
+        assert!(matches!(
+            &err,
+            CoreError::Storage(msg) if msg.contains("Failed to spawn process")
+        ));
+        assert!(err.to_string().contains("Failed to spawn process"));
+
+        // A process that never spawned has nothing to log.
+        assert!(saved_logs.lock().unwrap().is_empty());
     }
 }
