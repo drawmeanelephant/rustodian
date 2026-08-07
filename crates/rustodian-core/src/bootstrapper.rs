@@ -14,6 +14,38 @@ impl<'a> ProjectBootstrapper<'a> {
         Self { custodian }
     }
 
+    /// Run a required bootstrap or verification command, treating any non-zero
+    /// (or missing) exit code as a hard failure.
+    ///
+    /// Successful behavior and command names are unchanged — this only turns
+    /// failed commands into propagated errors so bootstrapping stops before
+    /// any later step runs.
+    fn run_checked(
+        &self,
+        project: &Project,
+        command_name: &str,
+        program: &str,
+        env: &HashMap<String, String>,
+    ) -> Result<(), CoreError> {
+        let exit_code = self.custodian.run_and_log_command(
+            project,
+            command_name,
+            program,
+            true,
+            env.clone(),
+        )?;
+        match exit_code {
+            Some(0) => Ok(()),
+            Some(code) => Err(CoreError::CommandFailed {
+                command_name: command_name.to_string(),
+                exit_code: code,
+            }),
+            None => Err(CoreError::CommandTerminated {
+                command_name: command_name.to_string(),
+            }),
+        }
+    }
+
     /// Perform environment isolation, bootstrap setup, and verification for the project.
     pub fn bootstrap_and_verify(&self, project: &Project) -> Result<(), CoreError> {
         let mut env = HashMap::new();
@@ -52,23 +84,11 @@ impl<'a> ProjectBootstrapper<'a> {
     ) -> Result<(), CoreError> {
         // Setup/Bootstrap
         tracing::info!("Bootstrapping Rust project: {}", project.name);
-        self.custodian.run_and_log_command(
-            project,
-            "bootstrap:rust",
-            "cargo build",
-            true,
-            env.clone(),
-        )?;
+        self.run_checked(project, "bootstrap:rust", "cargo build", env)?;
 
         // Verification
         tracing::info!("Verifying Rust project: {}", project.name);
-        self.custodian.run_and_log_command(
-            project,
-            "verify:rust",
-            "cargo test",
-            true,
-            env.clone(),
-        )?;
+        self.run_checked(project, "verify:rust", "cargo test", env)?;
 
         Ok(())
     }
@@ -91,18 +111,11 @@ impl<'a> ProjectBootstrapper<'a> {
 
         // Setup/Bootstrap
         tracing::info!("Bootstrapping Node project: {}", project.name);
-        self.custodian.run_and_log_command(
-            project,
-            "bootstrap:node",
-            install_cmd,
-            true,
-            env.clone(),
-        )?;
+        self.run_checked(project, "bootstrap:node", install_cmd, env)?;
 
         // Verification
         tracing::info!("Verifying Node project: {}", project.name);
-        self.custodian
-            .run_and_log_command(project, "verify:node", test_cmd, true, env.clone())?;
+        self.run_checked(project, "verify:node", test_cmd, env)?;
 
         Ok(())
     }
@@ -114,23 +127,11 @@ impl<'a> ProjectBootstrapper<'a> {
     ) -> Result<(), CoreError> {
         // Setup/Bootstrap
         tracing::info!("Bootstrapping Go project: {}", project.name);
-        self.custodian.run_and_log_command(
-            project,
-            "bootstrap:go",
-            "go mod download",
-            true,
-            env.clone(),
-        )?;
+        self.run_checked(project, "bootstrap:go", "go mod download", env)?;
 
         // Verification
         tracing::info!("Verifying Go project: {}", project.name);
-        self.custodian.run_and_log_command(
-            project,
-            "verify:go",
-            "go test ./...",
-            true,
-            env.clone(),
-        )?;
+        self.run_checked(project, "verify:go", "go test ./...", env)?;
 
         Ok(())
     }
@@ -146,8 +147,7 @@ impl<'a> ProjectBootstrapper<'a> {
         let mut venv_success = false;
         for cmd in &["python3 -m venv .venv", "python -m venv .venv"] {
             if self
-                .custodian
-                .run_and_log_command(project, "bootstrap:python_venv", cmd, true, env.clone())
+                .run_checked(project, "bootstrap:python_venv", cmd, env)
                 .is_ok()
             {
                 venv_success = true;
@@ -173,23 +173,11 @@ impl<'a> ProjectBootstrapper<'a> {
 
         if path.join("requirements.txt").exists() {
             let install_cmd = format!("{pip_path} install -r requirements.txt");
-            self.custodian.run_and_log_command(
-                project,
-                "bootstrap:python_deps",
-                &install_cmd,
-                true,
-                pip_env.clone(),
-            )?;
+            self.run_checked(project, "bootstrap:python_deps", &install_cmd, &pip_env)?;
         }
         if path.join("pyproject.toml").exists() || path.join("setup.py").exists() {
             let install_cmd = format!("{pip_path} install .");
-            self.custodian.run_and_log_command(
-                project,
-                "bootstrap:python_deps",
-                &install_cmd,
-                true,
-                pip_env.clone(),
-            )?;
+            self.run_checked(project, "bootstrap:python_deps", &install_cmd, &pip_env)?;
         }
 
         // Verification
@@ -211,8 +199,7 @@ impl<'a> ProjectBootstrapper<'a> {
         };
 
         tracing::info!("Verifying Python project: {}", project.name);
-        self.custodian
-            .run_and_log_command(project, "verify:python", &test_cmd, true, pip_env)?;
+        self.run_checked(project, "verify:python", &test_cmd, &pip_env)?;
 
         Ok(())
     }
@@ -227,6 +214,7 @@ mod tests {
         CommandRunner, GitInspector, ProjectScanner, ProjectStore, RunningProcess,
     };
     use rustodian_types::{DetectionConfidence, Language, LanguageDetection, Project, ProjectId};
+    use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -256,15 +244,21 @@ mod tests {
         }
     }
 
+    /// Mock command runner with a configurable queue of exit codes, consumed in
+    /// spawn order. Defaults to success (exit 0) when the queue is exhausted.
     struct MockCommandRunner {
         commands_run: Arc<Mutex<Vec<String>>>,
+        exit_codes: Arc<Mutex<VecDeque<i32>>>,
     }
 
     impl CommandRunner for MockCommandRunner {
         fn spawn(&self, spec: CommandSpec) -> Result<Box<dyn RunningProcess>, CoreError> {
             let mut list = self.commands_run.lock().unwrap();
             list.push(spec.program.clone());
-            Ok(Box::new(MockRunningProcess { exit_code: Some(0) }))
+            let exit_code = self.exit_codes.lock().unwrap().pop_front().unwrap_or(0);
+            Ok(Box::new(MockRunningProcess {
+                exit_code: Some(exit_code),
+            }))
         }
     }
 
@@ -342,28 +336,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_bootstrap_rust_project() {
-        let commands_run = Arc::new(Mutex::new(Vec::new()));
-        let runner = MockCommandRunner {
-            commands_run: commands_run.clone(),
-        };
-        let store = MockStore;
-        let scanner = MockScanner;
-        let git = MockGit;
-        let custodian = Custodian::new(
-            Box::new(store),
-            Box::new(scanner),
-            Box::new(git),
+    fn make_custodian(runner: MockCommandRunner) -> Custodian {
+        Custodian::new(
+            Box::new(MockStore),
+            Box::new(MockScanner),
+            Box::new(MockGit),
             Box::new(runner),
-        );
+        )
+    }
 
-        let project = Project {
+    fn make_runner(
+        commands_run: Arc<Mutex<Vec<String>>>,
+        exit_codes: Vec<i32>,
+    ) -> MockCommandRunner {
+        MockCommandRunner {
+            commands_run,
+            exit_codes: Arc::new(Mutex::new(VecDeque::from(exit_codes))),
+        }
+    }
+
+    fn make_project(name: &str, language: Language) -> Project {
+        Project {
             id: ProjectId::new(),
-            name: "test_rust".to_string(),
-            path: PathBuf::from("/tmp/test_rust"),
+            name: name.to_string(),
+            path: PathBuf::from(format!("/tmp/{name}")),
             languages: vec![LanguageDetection {
-                language: Language::Rust,
+                language,
                 confidence: DetectionConfidence::High,
                 markers: vec![],
             }],
@@ -371,10 +369,18 @@ mod tests {
             discovered_at: chrono::Utc::now(),
             last_scanned_at: None,
             metadata: rustodian_types::ProjectMetadata::default(),
-        };
+        }
+    }
 
-        let bootstrapper = ProjectBootstrapper::new(&custodian);
-        bootstrapper.bootstrap_and_verify(&project).unwrap();
+    #[test]
+    fn test_bootstrap_rust_project() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![]));
+        let project = make_project("test_rust", Language::Rust);
+
+        ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap();
 
         let run_list = commands_run.lock().unwrap();
         assert_eq!(run_list.len(), 2);
@@ -383,27 +389,143 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_build_failure_stops_before_test() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![1]));
+        let project = make_project("test_rust_fail", Language::Rust);
+
+        let err = ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap_err();
+
+        // `cargo test` must never run after a failed `cargo build`.
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 1);
+        assert_eq!(run_list[0], "cargo build");
+        assert!(err.to_string().contains("bootstrap:rust"));
+    }
+
+    #[test]
+    fn test_rust_test_failure_returns_failure() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![0, 1]));
+        let project = make_project("test_rust_test_fail", Language::Rust);
+
+        let err = ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap_err();
+
+        // Build succeeds, but a failed `cargo test` must fail the whole bootstrap.
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 2);
+        assert_eq!(run_list[0], "cargo build");
+        assert_eq!(run_list[1], "cargo test");
+        assert!(err.to_string().contains("verify:rust"));
+    }
+
+    #[test]
     fn test_bootstrap_go_project() {
         let commands_run = Arc::new(Mutex::new(Vec::new()));
-        let runner = MockCommandRunner {
-            commands_run: commands_run.clone(),
-        };
-        let store = MockStore;
-        let scanner = MockScanner;
-        let git = MockGit;
-        let custodian = Custodian::new(
-            Box::new(store),
-            Box::new(scanner),
-            Box::new(git),
-            Box::new(runner),
-        );
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![]));
+        let project = make_project("test_go", Language::Go);
 
+        ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap();
+
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 2);
+        assert_eq!(run_list[0], "go mod download");
+        assert_eq!(run_list[1], "go test ./...");
+    }
+
+    #[test]
+    fn test_go_verification_failure_propagates() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![0, 1]));
+        let project = make_project("test_go_fail", Language::Go);
+
+        let err = ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap_err();
+
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 2);
+        assert_eq!(run_list[0], "go mod download");
+        assert_eq!(run_list[1], "go test ./...");
+        assert!(err.to_string().contains("verify:go"));
+    }
+
+    #[test]
+    fn test_node_install_failure_stops_before_test() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![1]));
+        let project = make_project("test_node_fail", Language::Node);
+
+        let err = ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap_err();
+
+        // `npm test` must never run after a failed install.
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 1);
+        assert_eq!(run_list[0], "npm install");
+        assert!(err.to_string().contains("bootstrap:node"));
+    }
+
+    #[test]
+    fn test_python_venv_fallback_first_fails_second_succeeds() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![1, 0, 0]));
+        let project = make_project("test_python_fallback", Language::Python);
+
+        ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap();
+
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 3);
+        assert_eq!(run_list[0], "python3 -m venv .venv");
+        assert_eq!(run_list[1], "python -m venv .venv");
+        let test_cmd = if cfg!(windows) {
+            ".venv\\Scripts\\python -m unittest discover"
+        } else {
+            ".venv/bin/python -m unittest discover"
+        };
+        assert_eq!(run_list[2], test_cmd);
+    }
+
+    #[test]
+    fn test_python_both_venv_commands_fail() {
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![1, 1]));
+        let project = make_project("test_python_venv_fail", Language::Python);
+
+        let err = ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap_err();
+
+        // No dependency install or verification may run when the venv cannot be created.
+        let run_list = commands_run.lock().unwrap();
+        assert_eq!(run_list.len(), 2);
+        assert_eq!(run_list[0], "python3 -m venv .venv");
+        assert_eq!(run_list[1], "python -m venv .venv");
+        assert!(err.to_string().contains(".venv"));
+    }
+
+    #[test]
+    fn test_python_dependency_failure_propagates() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("requirements.txt"), b"requests==2.32.0\n").unwrap();
+
+        let commands_run = Arc::new(Mutex::new(Vec::new()));
+        let custodian = make_custodian(make_runner(commands_run.clone(), vec![0, 1]));
         let project = Project {
             id: ProjectId::new(),
-            name: "test_go".to_string(),
-            path: PathBuf::from("/tmp/test_go"),
+            name: "test_python_deps".to_string(),
+            path: temp.path().to_path_buf(),
             languages: vec![LanguageDetection {
-                language: Language::Go,
+                language: Language::Python,
                 confidence: DetectionConfidence::High,
                 markers: vec![],
             }],
@@ -413,12 +535,20 @@ mod tests {
             metadata: rustodian_types::ProjectMetadata::default(),
         };
 
-        let bootstrapper = ProjectBootstrapper::new(&custodian);
-        bootstrapper.bootstrap_and_verify(&project).unwrap();
+        let err = ProjectBootstrapper::new(&custodian)
+            .bootstrap_and_verify(&project)
+            .unwrap_err();
 
+        // A failed dependency install must fail the whole bootstrap before verification.
         let run_list = commands_run.lock().unwrap();
         assert_eq!(run_list.len(), 2);
-        assert_eq!(run_list[0], "go mod download");
-        assert_eq!(run_list[1], "go test ./...");
+        assert_eq!(run_list[0], "python3 -m venv .venv");
+        let install_cmd = if cfg!(windows) {
+            ".venv\\Scripts\\pip install -r requirements.txt"
+        } else {
+            ".venv/bin/pip install -r requirements.txt"
+        };
+        assert_eq!(run_list[1], install_cmd);
+        assert!(err.to_string().contains("bootstrap:python_deps"));
     }
 }
