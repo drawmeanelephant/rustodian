@@ -32,6 +32,9 @@ dirs = "6.0.0"
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
+# Already locked at 0.1.89 via rustodian-core / rustodian-remote; needed to
+# implement the `RemoteDownloader` trait for a fake in the refresh regression test.
+async-trait = "0.1"
 
 [lints]
 workspace = true
