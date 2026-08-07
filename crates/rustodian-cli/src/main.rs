@@ -18,6 +18,7 @@ use tracing::info;
 
 use rustodian_core::Custodian;
 use rustodian_git::Git2Inspector;
+use rustodian_remote::GithubDownloader;
 use rustodian_scanner::FsScanner;
 use rustodian_storage::SqliteStore;
 
@@ -197,9 +198,12 @@ fn main() -> Result<()> {
                 preserve,
             } => commands::remote::execute_add(&store, &repo_slug, &preserve),
             RemoteCommands::List => commands::remote::execute_list(&store, &cli.format),
-            RemoteCommands::Refresh { dest } => {
-                commands::remote::execute_refresh(&custodian, &store, &dest)
-            }
+            RemoteCommands::Refresh { dest } => commands::remote::execute_refresh(
+                &custodian,
+                &store,
+                &GithubDownloader::new(),
+                &dest,
+            ),
         },
         Commands::Info { project } => commands::info::execute(&custodian, &project, &cli.format),
         Commands::Janitor {

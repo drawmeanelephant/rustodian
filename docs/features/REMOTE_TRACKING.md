@@ -25,6 +25,18 @@ To prevent overwriting local configurations or files when refreshing an archive,
 ## Rate Limit Handling
 When fetching PRs, `GithubDownloader` monitors the HTTP response. A `403 Forbidden` with an `X-RateLimit-Remaining` header of `"0"` is mapped to `CoreError::RateLimitExceeded`. This enables upper layers to handle rate limits gracefully.
 
+## Safety: Refresh Never Executes Downloaded Code
+
+`rustodian remote refresh` is a **synchronization** operation, not a build or test operation. It downloads the archive, extracts it (applying `preserve_patterns`), and scans/indexes the resulting project. It **never** bootstraps the downloaded project and **never** executes code from it:
+
+- no `cargo build` / `cargo test`
+- no `npm` / `yarn` / `pnpm` / `bun` install or test commands
+- no `go mod download` / `go test`
+- no Python virtualenv creation or `pip` installs
+- no Justfile recipes or other discovered project commands
+
+Downloading an untrusted repository must not imply executing it. If you want to build or test a project, run the dedicated `rustodian run` command explicitly after you have reviewed the code.
+
 ## Example CLI Usage
 You can use the `rustodian` CLI to manage remote repositories. Here is a realistic end-to-end example: adding a project with a preserve pattern, listing tracked projects, and refreshing the repository.
 
@@ -44,5 +56,5 @@ Refreshing octocat/Hello-World...
 Successfully refreshed octocat/Hello-World
 Scanning project octocat/Hello-World...
 Scan completed. Found 0 projects.
-Could not find the project in database by path: ./my_remotes/octocat/Hello-World
+Index updated for octocat/Hello-World (download, extract, and scan only — no code was executed).
 ```
