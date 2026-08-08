@@ -53,14 +53,10 @@ impl ProjectScanner for FsScanner {
 
         let projects: std::sync::Arc<std::sync::Mutex<Vec<DiscoveredProject>>> =
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let project_roots: std::sync::Arc<
-            std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>,
-        > = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
         let walker = builder.build_parallel();
         walker.run(|| {
             let projects = std::sync::Arc::clone(&projects);
-            let project_roots = std::sync::Arc::clone(&project_roots);
             Box::new(move |result| {
                 let entry = match result {
                     Ok(e) => e,
@@ -75,20 +71,13 @@ impl ProjectScanner for FsScanner {
                     return ignore::WalkState::Continue;
                 }
 
-                // Skip if this directory is a child of an already-discovered
-                // project root. This prevents detecting nested sub-projects
-                // (e.g. a workspace member inside a Cargo workspace root).
-                {
-                    let roots = project_roots
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    for root in roots.iter() {
-                        if path.starts_with(root) && path != root {
-                            return ignore::WalkState::Skip;
-                        }
-                    }
-                }
-
+                // Collect every candidate project root. We deliberately keep
+                // descending into project directories: an independently
+                // managed repository nested inside another project (its own
+                // `.git`, or a `.rustodian.toml`) must still be discovered.
+                // Suppression of ordinary nested workspace/package directories
+                // is decided in a deterministic post-processing pass below,
+                // never by traversal order.
                 let languages = crate::detection::detect_languages(path);
                 let root_markers = crate::detection::detect_project_roots(path);
 
@@ -112,14 +101,6 @@ impl ProjectScanner for FsScanner {
                             project_roots: root_markers,
                         });
                     }
-
-                    // Record this as a project root so children are skipped.
-                    if let Ok(mut roots) = project_roots.lock() {
-                        roots.insert(path.to_path_buf());
-                    }
-
-                    // Skip descending into this directory's children.
-                    return ignore::WalkState::Skip;
                 }
 
                 ignore::WalkState::Continue
@@ -139,8 +120,36 @@ impl ProjectScanner for FsScanner {
         // Sort by path for deterministic output regardless of walk order.
         projects.sort_by(|a, b| a.path.cmp(&b.path));
 
+        // A nested project is only reported independently when it carries a
+        // strong independence signal: its own `.git` (directory or file, e.g.
+        // a worktree) or a `.rustodian.toml` config. A candidate nested inside
+        // another candidate without such a signal is an ordinary workspace or
+        // package member and remains suppressed beneath the parent project.
+        // The scan root itself and candidates with no ancestor project are
+        // always reported.
+        let roots: std::collections::HashSet<std::path::PathBuf> =
+            projects.iter().map(|p| p.path.clone()).collect();
+        projects.retain(|p| {
+            let mut ancestor = p.path.parent();
+            while let Some(dir) = ancestor {
+                if roots.contains(dir) {
+                    return has_independence_signal(&p.path);
+                }
+                ancestor = dir.parent();
+            }
+            true
+        });
+
         Ok(projects)
     }
+}
+
+/// Whether a directory carries a strong signal that it is independently
+/// managed: its own `.git` (directory or file, e.g. a worktree) or a
+/// `.rustodian.toml` config. Cheap filesystem checks only — no git commands
+/// are invoked.
+fn has_independence_signal(dir: &Path) -> bool {
+    dir.join(".git").exists() || dir.join(".rustodian.toml").exists()
 }
 
 #[cfg(test)]
@@ -281,31 +290,274 @@ mod tests {
     }
 
     #[test]
-    fn test_scanner_nested_skipping() {
+    fn test_scanner_workspace_member_remains_suppressed() {
         let dir = tempdir().unwrap();
         let root = dir.path();
 
-        // Create parent project (Rust project)
-        let parent_proj = root.join("parent_proj");
-        fs::create_dir_all(&parent_proj).unwrap();
-        File::create(parent_proj.join("Cargo.toml")).unwrap();
+        // Parent project (Rust workspace root)
+        let app = root.join("app");
+        fs::create_dir_all(&app).unwrap();
+        File::create(app.join("Cargo.toml")).unwrap();
 
-        // Create nested project inside parent (Node project)
-        let nested_proj = parent_proj.join("nested_node_proj");
-        fs::create_dir_all(&nested_proj).unwrap();
-        File::create(nested_proj.join("package.json")).unwrap();
+        // Ordinary workspace member: no independence signal, so it stays
+        // suppressed beneath the already-discovered parent project.
+        let member = app.join("crates/foo");
+        fs::create_dir_all(&member).unwrap();
+        File::create(member.join("Cargo.toml")).unwrap();
 
         let scanner = FsScanner;
         let config = ScanConfig {
-            max_depth: 5,
+            max_depth: 6,
             follow_symlinks: false,
             exclude_patterns: vec![],
         };
         let projs = scanner.scan(root, &config).unwrap();
 
-        // It should only find "parent_proj" and skip descending into "nested_node_proj"
         assert_eq!(projs.len(), 1);
-        assert_eq!(projs[0].name, "parent_proj");
+        assert_eq!(projs[0].name, "app");
+    }
+
+    #[test]
+    fn test_scanner_nested_git_repo_survives() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Parent project
+        let corpus = root.join("corpus");
+        fs::create_dir_all(&corpus).unwrap();
+        File::create(corpus.join("Cargo.toml")).unwrap();
+
+        // Independently managed nested repo: has its own `.git` directory.
+        let nested = corpus.join("filed.fyi");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(nested.join(".git")).unwrap();
+        File::create(nested.join("package.json")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 6,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 2);
+        assert_eq!(projs[0].name, "corpus");
+        assert_eq!(projs[1].name, "filed.fyi");
+    }
+
+    #[test]
+    fn test_scanner_nested_git_file_survives() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Parent project
+        let corpus = root.join("corpus");
+        fs::create_dir_all(&corpus).unwrap();
+        File::create(corpus.join("Cargo.toml")).unwrap();
+
+        // Nested repo using a `.git` file (e.g. a worktree or submodule).
+        let nested = corpus.join("worktree");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join(".git"), "gitdir: /some/where").unwrap();
+        File::create(nested.join("package.json")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 6,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 2);
+        assert_eq!(projs[0].name, "corpus");
+        assert_eq!(projs[1].name, "worktree");
+    }
+
+    #[test]
+    fn test_scanner_nested_rustodian_managed_survives() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Parent project
+        let app = root.join("app");
+        fs::create_dir_all(&app).unwrap();
+        File::create(app.join("Cargo.toml")).unwrap();
+
+        // Explicitly Rustodian-managed nested project: `.rustodian.toml`.
+        let widget = app.join("tools/widget");
+        fs::create_dir_all(&widget).unwrap();
+        fs::write(widget.join(".rustodian.toml"), "[commands]\n").unwrap();
+        File::create(widget.join("package.json")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 6,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 2);
+        assert_eq!(projs[0].name, "app");
+        assert_eq!(projs[1].name, "widget");
+    }
+
+    #[test]
+    fn test_scanner_sibling_projects_both_survive() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        for name in ["alpha", "beta"] {
+            let proj = root.join(name);
+            fs::create_dir_all(&proj).unwrap();
+            File::create(proj.join("Cargo.toml")).unwrap();
+        }
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 2);
+        assert_eq!(projs[0].name, "alpha");
+        assert_eq!(projs[1].name, "beta");
+    }
+
+    #[test]
+    fn test_scanner_deeply_nested_independent_repo_survives() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Parent project
+        let corpus = root.join("corpus");
+        fs::create_dir_all(&corpus).unwrap();
+        File::create(corpus.join("Cargo.toml")).unwrap();
+
+        // Deeply nested independently managed repo.
+        let nested = corpus.join("a/b/c/d/repo");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(nested.join(".git")).unwrap();
+        File::create(nested.join("go.mod")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 8,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 2);
+        assert_eq!(projs[0].name, "corpus");
+        assert_eq!(projs[1].name, "repo");
+    }
+
+    #[test]
+    fn test_scanner_output_deterministic_across_runs() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let corpus = root.join("corpus");
+        fs::create_dir_all(&corpus).unwrap();
+        File::create(corpus.join("Cargo.toml")).unwrap();
+
+        // Independently managed nested repo.
+        let nested = corpus.join("filed.fyi");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(nested.join(".git")).unwrap();
+        File::create(nested.join("package.json")).unwrap();
+
+        // Ordinary workspace member, exercising the suppression path.
+        let member = corpus.join("crates/foo");
+        fs::create_dir_all(&member).unwrap();
+        File::create(member.join("Cargo.toml")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 6,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+
+        let first = scanner.scan(root, &config).unwrap();
+        let second = scanner.scan(root, &config).unwrap();
+
+        // `DiscoveredProject` has no `PartialEq`; key fields determine each
+        // entry, so compare on (name, path).
+        let keyed = |projs: &[DiscoveredProject]| {
+            projs
+                .iter()
+                .map(|p| (p.name.clone(), p.path.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        // Identical output across runs, sorted by path.
+        let mut sorted = keyed(&first);
+        sorted.sort();
+        assert_eq!(keyed(&first), sorted);
+        assert_eq!(keyed(&first), keyed(&second));
+    }
+
+    #[test]
+    fn test_scanner_nested_repo_direct_scan_equivalent() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let corpus = root.join("corpus");
+        fs::create_dir_all(&corpus).unwrap();
+        File::create(corpus.join("Cargo.toml")).unwrap();
+
+        let nested = corpus.join("filed.fyi");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(nested.join(".git")).unwrap();
+        fs::write(
+            nested.join("package.json"),
+            r#"{"scripts": {"dev": "vite"}}"#,
+        )
+        .unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 6,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+
+        let from_parent = scanner.scan(root, &config).unwrap();
+        let nested_from_parent = from_parent
+            .iter()
+            .find(|p| p.name == "filed.fyi")
+            .expect("nested independent repo should be discovered from the parent");
+
+        let direct = scanner.scan(&nested, &config).unwrap();
+        assert_eq!(direct.len(), 1);
+        let direct_proj = &direct[0];
+
+        assert_eq!(nested_from_parent.name, direct_proj.name);
+        assert_eq!(nested_from_parent.path, direct_proj.path);
+
+        // Equivalent language metadata.
+        let lang_keyed = |p: &DiscoveredProject| {
+            p.languages
+                .iter()
+                .map(|l| (l.language.clone(), format!("{:?}", l.markers)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(lang_keyed(nested_from_parent), lang_keyed(direct_proj));
+
+        // Equivalent command metadata.
+        let cmd_keyed = |p: &DiscoveredProject| {
+            p.commands
+                .iter()
+                .map(|c| (c.name.clone(), c.command.clone(), c.source.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(cmd_keyed(nested_from_parent), cmd_keyed(direct_proj));
     }
 
     #[test]

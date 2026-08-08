@@ -190,6 +190,45 @@ fn test_janitor() {
     assert!(node_modules_dir.exists());
 }
 
+/// A forced `SQLite` write failure during `rustodian scan` must surface
+/// clearly and make the CLI exit nonzero — never a warning followed by an
+/// apparent success.
+#[cfg(unix)]
+#[test]
+fn test_scan_storage_failure_exits_nonzero() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let proj_dir = dir.path().join("my-rust-proj");
+    fs::create_dir(&proj_dir).unwrap();
+    fs::write(proj_dir.join("Cargo.toml"), "[package]").unwrap();
+
+    // 1. Scan once to create and migrate the database.
+    scan_project(dir.path(), "test.db");
+
+    // 2. Make the database and its WAL sidecars read-only. The next invocation
+    //    is a fresh process, so its connections open the files read-only and
+    //    every write fails with a real SQLite error.
+    for name in ["test.db", "test.db-wal", "test.db-shm"] {
+        let p = dir.path().join(name);
+        if p.exists() {
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o444)).unwrap();
+        }
+    }
+
+    // 3. The second scan must surface the storage failure and exit nonzero,
+    //    without printing the usual success banner.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("scan")
+        .arg("--path")
+        .arg(dir.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("readonly"))
+        .stdout(predicate::str::contains("Scan Complete").not());
+}
+
 #[cfg(unix)]
 #[test]
 fn test_janitor_refuses_symlink_target() {
@@ -345,4 +384,116 @@ fn test_brief_ignores_janitor_logs_for_health() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("janitor:clean"));
+}
+
+#[test]
+fn test_scan_keeps_missing_project_and_prune_removes_it() {
+    let dir = TempDir::new().unwrap();
+    let proj_dir = dir.path().join("vanishing-proj");
+    fs::create_dir(&proj_dir).unwrap();
+    fs::write(proj_dir.join("Cargo.toml"), "[package]").unwrap();
+
+    // 1. Scan indexes the project.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("scan")
+        .arg("--path")
+        .arg(dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Projects Found:   1"));
+
+    // 2. Deleting the directory must NOT erase the tracked project on the
+    //    next scan — scans are additive and never purge.
+    fs::remove_dir_all(&proj_dir).unwrap();
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("scan")
+        .arg("--path")
+        .arg(dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Projects Found:   0"));
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("list");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("vanishing-proj"));
+
+    // 3. Prune defaults to a dry run: it reports the stale record but leaves
+    //    it stored.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("prune");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("vanishing-proj"))
+        .stdout(predicate::str::contains("dry run"));
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("list");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("vanishing-proj"));
+
+    // 4. Prune --purge removes the database record only.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("prune")
+        .arg("--purge");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("vanishing-proj"))
+        .stdout(predicate::str::contains("Removed"));
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("list");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("vanishing-proj").not());
+}
+
+#[test]
+fn test_prune_json_output_is_structured() {
+    let dir = TempDir::new().unwrap();
+    let proj_dir = dir.path().join("stale-proj");
+    fs::create_dir(&proj_dir).unwrap();
+    fs::write(proj_dir.join("Cargo.toml"), "[package]").unwrap();
+
+    scan_project(dir.path(), "test.db");
+    fs::remove_dir_all(&proj_dir).unwrap();
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    let output = cmd
+        .env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("prune")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["dry_run"], true);
+    assert_eq!(json["stale_project_count"], 1);
+    assert_eq!(json["projects"][0]["name"], "stale-proj");
+    assert_eq!(json["projects"][0]["outcome"], "detected");
+    assert!(json["projects"][0]["id"].is_string());
+    assert!(json["projects"][0]["path"].is_string());
+}
+
+#[test]
+fn test_prune_empty_database() {
+    let dir = TempDir::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("prune");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("No stale projects found"));
 }
