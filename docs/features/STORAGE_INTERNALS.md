@@ -62,6 +62,15 @@ Rustodian uses `r2d2` for connection pooling and configures SQLite in Write-Ahea
 
 **Why WAL and r2d2?** WAL allows simultaneous readers and a single writer, which is crucial for the `rustodian-desktop` application. It ensures background scanning threads can safely read and write to the database without locking up the Slint UI thread's reads. A `busy_timeout = 5000` is also employed to prevent transient failure if the single writer lock is temporarily held.
 
+### Initialization: one-time bootstrap vs. per-connection pragmas
+
+Database initialization is split by which pragmas change persistent state and which are connection-local:
+
+- **One-time bootstrap (`SqliteStore::open`):** `PRAGMA journal_mode = WAL` is executed exactly once on a dedicated connection *before the pool exists*. The journal mode is stored in the database file header, so it is a database-wide, one-time property. Changing it takes the database write lock (`sqlite3BtreeSetVersion` → `sqlite3BtreeBeginTrans`), which is why it must never run inside per-connection initialization: r2d2 eagerly creates up to `max_size` connections at `Pool::new`, and several fresh connections transitioning the same fresh database to WAL simultaneously would collide with `SQLITE_BUSY` ("database is locked"). Because that error was transient and retried, it used to surface as an `ERROR database is locked` log line followed by a successful exit 0.
+- **Per-connection initialization (every pooled connection):** only connection-local pragmas run — `busy_timeout = 5000` (first, so a busy handler exists for anything that follows), `synchronous = NORMAL`, and `foreign_keys = ON`. These configure only the individual connection and take no database locks, so they are safe to run concurrently while other connections read or write.
+
+For in-memory databases (`open_in_memory`) the bootstrap is a harmless no-op — `WAL` is unsupported on memory databases and the pragma reports `memory` — but the same uniform path is used.
+
 ## JSON Metadata Strategy
 
 Instead of defining strict columns for every possible project attribute, flexible data is serialized into a single `metadata_json` column. The structure maps to: `{"meta": project.metadata, "vcs": project.vcs, "languages": project.languages}`.
