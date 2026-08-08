@@ -22,7 +22,50 @@ pub struct ScanReport {
     pub projects_found: usize,
     pub projects_new: usize,
     pub projects_updated: usize,
+    /// Always zero: scans are additive and never delete tracked projects,
+    /// even when their paths no longer exist. Stale database records are
+    /// removed explicitly with [`Custodian::prune`].
     pub projects_purged: usize,
+}
+
+/// Disposition of one stale project during a prune.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneOutcome {
+    /// The tracked path is missing; the record was kept (dry run).
+    Detected,
+    /// The tracked path is missing; the database record was deleted.
+    Purged,
+}
+
+impl PruneOutcome {
+    /// Stable string label used by CLI formatting.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Detected => "detected",
+            Self::Purged => "purged",
+        }
+    }
+}
+
+/// Result for one stale project during a prune.
+#[derive(Debug, Clone)]
+pub struct PruneProjectResult {
+    pub id: ProjectId,
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub outcome: PruneOutcome,
+}
+
+/// Report from a prune operation.
+#[derive(Debug, Clone)]
+pub struct PruneReport {
+    /// True when the operation only inspected and mutated nothing.
+    pub dry_run: bool,
+    /// Number of tracked projects whose stored path no longer exists.
+    pub stale_project_count: usize,
+    /// Per-project results for every stale project.
+    pub projects: Vec<PruneProjectResult>,
 }
 
 /// Overall status summary.
@@ -140,28 +183,61 @@ impl Custodian {
 
         let scan_id = self.store.save_scan(&scan_record)?;
 
-        // ── Self-Healing Garbage Collection Pass ──────────────────────
-        // Purge tracked projects whose paths no longer exist on disk.
-        let mut projects_purged = 0usize;
-        let all_tracked = self.store.list_projects()?;
-        for tracked in &all_tracked {
-            if !tracked.path.exists() {
-                self.store.delete_project(&tracked.id)?;
-                info!(
-                    project = %tracked.name,
-                    path = %tracked.path.display(),
-                    "Garbage-collected dead project path"
-                );
-                projects_purged += 1;
-            }
-        }
-
+        // No deletion pass: a tracked project is never removed just because its
+        // filesystem path is temporarily missing. Explicit `prune` handles
+        // stale database records.
         Ok(ScanReport {
             scan_id,
             projects_found: discovered.len(),
             projects_new,
             projects_updated,
-            projects_purged,
+            projects_purged: 0,
+        })
+    }
+
+    /// Find tracked projects whose stored paths no longer exist on disk.
+    ///
+    /// Defaults to a dry run that only reports stale records. With `purge`,
+    /// the database records of stale projects are deleted, relying on existing
+    /// foreign-key cascades for associated relational data. This never touches
+    /// the filesystem.
+    #[instrument(skip(self), fields(purge))]
+    pub fn prune(&self, purge: bool) -> Result<PruneReport, CoreError> {
+        info!(purge, "Pruning stale project records");
+        let all_tracked = self.store.list_projects()?;
+
+        let mut projects = Vec::new();
+        for tracked in &all_tracked {
+            if !tracked.path.exists() {
+                let outcome = if purge {
+                    self.store.delete_project(&tracked.id)?;
+                    info!(
+                        project = %tracked.name,
+                        path = %tracked.path.display(),
+                        "Purged stale project record"
+                    );
+                    PruneOutcome::Purged
+                } else {
+                    info!(
+                        project = %tracked.name,
+                        path = %tracked.path.display(),
+                        "Detected stale project record (dry run)"
+                    );
+                    PruneOutcome::Detected
+                };
+                projects.push(PruneProjectResult {
+                    id: tracked.id.clone(),
+                    name: tracked.name.clone(),
+                    path: tracked.path.clone(),
+                    outcome,
+                });
+            }
+        }
+
+        Ok(PruneReport {
+            dry_run: !purge,
+            stale_project_count: projects.len(),
+            projects,
         })
     }
 
@@ -894,5 +970,222 @@ mod tests {
             &err,
             CoreError::Storage(msg) if msg.contains("injected storage failure")
         ));
+    }
+
+    // ── explicit prune replaces implicit scan deletion ──────────────────
+
+    /// In-memory store seeded with tracked projects; records every deletion.
+    struct TrackedStore {
+        projects: Arc<Mutex<Vec<Project>>>,
+        deleted: Arc<Mutex<Vec<ProjectId>>>,
+    }
+
+    impl ProjectStore for TrackedStore {
+        fn save_project(&self, project: &Project) -> Result<ProjectId, CoreError> {
+            let mut projects = self.projects.lock().unwrap();
+            match projects.iter_mut().find(|p| p.path == project.path) {
+                Some(existing) => *existing = project.clone(),
+                None => projects.push(project.clone()),
+            }
+            Ok(project.id.clone())
+        }
+        fn get_project(&self, id: &ProjectId) -> Result<Option<Project>, CoreError> {
+            Ok(self
+                .projects
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|p| p.id == *id)
+                .cloned())
+        }
+        fn list_projects(&self) -> Result<Vec<Project>, CoreError> {
+            Ok(self.projects.lock().unwrap().clone())
+        }
+        fn delete_project(&self, id: &ProjectId) -> Result<bool, CoreError> {
+            let mut projects = self.projects.lock().unwrap();
+            let before = projects.len();
+            projects.retain(|p| p.id != *id);
+            self.deleted.lock().unwrap().push(id.clone());
+            Ok(projects.len() != before)
+        }
+        fn find_by_path(&self, path: &Path) -> Result<Option<Project>, CoreError> {
+            Ok(self
+                .projects
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|p| p.path == path)
+                .cloned())
+        }
+        fn save_scan(&self, _scan: &ScanRecord) -> Result<ScanId, CoreError> {
+            Ok(ScanId::new())
+        }
+        fn get_latest_scan(&self) -> Result<Option<ScanRecord>, CoreError> {
+            Ok(None)
+        }
+        fn save_log(&self, _log: &ProjectLog) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn list_logs(
+            &self,
+            _project_id: &str,
+            _limit: usize,
+        ) -> Result<Vec<ProjectLog>, CoreError> {
+            Ok(vec![])
+        }
+        fn get_log(&self, _id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn get_latest_log(&self, _project_id: &str) -> Result<Option<ProjectLog>, CoreError> {
+            Ok(None)
+        }
+        fn prune_logs(&self, _project_id: &str, _limit: usize) -> Result<usize, CoreError> {
+            Ok(0)
+        }
+    }
+
+    fn tracked_project(name: &str, path: &str) -> Project {
+        Project {
+            id: ProjectId::new(),
+            name: name.to_string(),
+            path: PathBuf::from(path),
+            languages: vec![],
+            vcs: None,
+            discovered_at: chrono::Utc::now(),
+            last_scanned_at: None,
+            metadata: rustodian_types::ProjectMetadata::default(),
+        }
+    }
+
+    fn custodian_with_tracked(projects: Vec<Project>) -> (Custodian, Arc<Mutex<Vec<ProjectId>>>) {
+        let deleted = Arc::new(Mutex::new(Vec::new()));
+        let store = TrackedStore {
+            projects: Arc::new(Mutex::new(projects)),
+            deleted: deleted.clone(),
+        };
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(MockScanner),
+            Box::new(MockGit),
+            Box::new(DefaultCommandRunner),
+        );
+        (custodian, deleted)
+    }
+
+    #[test]
+    fn test_scan_does_not_delete_missing_tracked_project() {
+        let (custodian, deleted) =
+            custodian_with_tracked(vec![tracked_project("gone", "/does/not/exist")]);
+
+        let report = custodian
+            .scan(Path::new("/projects"), &ScanConfig::default())
+            .expect("scan should succeed");
+
+        // The scan discovers nothing but must not purge the tracked project
+        // merely because its path is missing.
+        assert_eq!(
+            report.projects_purged, 0,
+            "scan reports zero implicit purges"
+        );
+        assert!(
+            deleted.lock().unwrap().is_empty(),
+            "scan must never call delete_project"
+        );
+        assert_eq!(
+            custodian.list().unwrap().len(),
+            1,
+            "missing-path project must survive the scan"
+        );
+    }
+
+    #[test]
+    fn test_prune_dry_run_detects_stale_but_keeps_record() {
+        let (custodian, deleted) =
+            custodian_with_tracked(vec![tracked_project("gone", "/does/not/exist")]);
+
+        let report = custodian.prune(false).expect("dry run should succeed");
+
+        assert!(report.dry_run);
+        assert_eq!(report.stale_project_count, 1);
+        assert_eq!(report.projects.len(), 1);
+        assert_eq!(report.projects[0].name, "gone");
+        assert_eq!(report.projects[0].path, PathBuf::from("/does/not/exist"));
+        assert_eq!(report.projects[0].outcome, PruneOutcome::Detected);
+
+        assert!(
+            deleted.lock().unwrap().is_empty(),
+            "dry run must not delete anything"
+        );
+        assert_eq!(
+            custodian.list().unwrap().len(),
+            1,
+            "dry run must not mutate storage"
+        );
+    }
+
+    #[test]
+    fn test_prune_purge_removes_stale_record() {
+        let (custodian, deleted) =
+            custodian_with_tracked(vec![tracked_project("gone", "/does/not/exist")]);
+
+        let report = custodian.prune(true).expect("purge should succeed");
+
+        assert!(!report.dry_run);
+        assert_eq!(report.stale_project_count, 1);
+        assert_eq!(report.projects[0].outcome, PruneOutcome::Purged);
+        assert_eq!(deleted.lock().unwrap().len(), 1);
+        assert!(
+            custodian.list().unwrap().is_empty(),
+            "purge must remove the stale record"
+        );
+    }
+
+    #[test]
+    fn test_prune_ignores_projects_with_existing_paths() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let (custodian, deleted) = custodian_with_tracked(vec![
+            tracked_project("alive", dir.path().to_str().unwrap()),
+            tracked_project("gone", "/does/not/exist"),
+        ]);
+
+        let report = custodian.prune(false).expect("dry run should succeed");
+
+        assert_eq!(report.stale_project_count, 1);
+        assert_eq!(report.projects.len(), 1);
+        assert_eq!(report.projects[0].name, "gone");
+        assert!(
+            deleted.lock().unwrap().is_empty(),
+            "existing projects must never be considered stale"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_database_succeeds() {
+        let (custodian, _deleted) = custodian_with_tracked(vec![]);
+
+        let dry = custodian.prune(false).expect("dry run on empty db");
+        assert!(dry.dry_run);
+        assert_eq!(dry.stale_project_count, 0);
+        assert!(dry.projects.is_empty());
+
+        let purged = custodian.prune(true).expect("purge on empty db");
+        assert!(!purged.dry_run);
+        assert_eq!(purged.stale_project_count, 0);
+    }
+
+    #[test]
+    fn test_prune_dry_run_performs_zero_mutation() {
+        let (custodian, deleted) =
+            custodian_with_tracked(vec![tracked_project("gone", "/does/not/exist")]);
+
+        let report = custodian.prune(false).expect("dry run should succeed");
+        assert_eq!(report.stale_project_count, 1);
+
+        // Nothing changed: the project is still listed with the same identity.
+        let remaining = custodian.list().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].name, "gone");
+        assert_eq!(remaining[0].id, report.projects[0].id);
+        assert!(deleted.lock().unwrap().is_empty());
     }
 }

@@ -25,7 +25,7 @@ pub use bootstrapper::ProjectBootstrapper;
 pub use brief::{
     AttentionReason, BriefCategory, BriefCounts, BriefReport, ProjectBrief, SuggestedAction,
 };
-pub use custodian::Custodian;
+pub use custodian::{Custodian, PruneOutcome, PruneProjectResult, PruneReport};
 pub use error::CoreError;
 pub use janitor::DigitalJanitor;
 pub use log_buffer::LogBuffer;

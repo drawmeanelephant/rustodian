@@ -652,6 +652,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_delete_project_cascades_associated_records() {
+        use rustodian_core::traits::ProjectStore;
+        use rustodian_types::{
+            DetectionConfidence, Language, LanguageDetection, Project, ProjectId, ProjectLog,
+        };
+        use std::path::PathBuf;
+
+        let store = SqliteStore::open_in_memory().unwrap();
+        store.migrate().unwrap();
+
+        let proj = Project {
+            id: ProjectId::new(),
+            name: "cascade-me".to_string(),
+            path: PathBuf::from("/cascade"),
+            discovered_at: chrono::Utc::now(),
+            last_scanned_at: None,
+            vcs: None,
+            languages: vec![LanguageDetection {
+                language: Language::Rust,
+                confidence: DetectionConfidence::High,
+                markers: vec![rustodian_types::LanguageMarker::ManifestFile(
+                    "Cargo.toml".to_string(),
+                )],
+            }],
+            metadata: rustodian_types::ProjectMetadata::default(),
+        };
+        store.save_project(&proj).unwrap();
+
+        let log = ProjectLog {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: proj.id.to_string(),
+            command_name: "test_cmd".to_string(),
+            exit_code: Some(0),
+            log_text: "log".to_string(),
+            run_at: chrono::Utc::now(),
+        };
+        store.save_log(&log).unwrap();
+
+        // Deleting the project must cascade to its logs and languages.
+        assert!(store.delete_project(&proj.id).unwrap());
+        assert!(store.get_project(&proj.id).unwrap().is_none());
+        assert!(
+            store
+                .list_logs(&proj.id.to_string(), 10)
+                .unwrap()
+                .is_empty()
+        );
+
+        let conn = store.get_conn().unwrap();
+        let language_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_languages WHERE project_id = ?1",
+                rusqlite::params![proj.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(language_count, 0, "languages must cascade on delete");
+    }
+
+    #[test]
     fn test_open_in_memory() {
         let store = SqliteStore::open_in_memory().expect("should open in-memory db");
         store.migrate().expect("should run migrations");
