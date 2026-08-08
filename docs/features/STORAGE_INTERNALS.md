@@ -78,7 +78,7 @@ We maintain a `project_languages` side-table with an `ON DELETE CASCADE` foreign
 
 When saving a project, the system uses an `ON CONFLICT(path) DO UPDATE` query to upsert records.
 
-**Why overwrite `discovered_at`?** The upsert logic intentionally overwrites `discovered_at` (`discovered_at=excluded.discovered_at`). While this sacrifices the ability to track the immutable "first-seen" timestamp of a project, it drastically simplifies the SQL queries by avoiding complex conditional merges.
+**Why preserve `discovered_at`?** The upsert deliberately leaves `discovered_at` out of the `DO UPDATE SET` clause, so it is only ever written on the initial insert. Repeated saves of an existing path therefore keep the original "first-seen" timestamp: SQLite's `ON CONFLICT(path) DO UPDATE` preserves the column's existing value when it is not assigned, requiring no application-side read-before-write.
 
 Updating the `project_languages` side-table relies on a simple delete-and-reinsert pattern for a given `project_id`.
 
@@ -90,4 +90,4 @@ Updating the `project_languages` side-table relies on a simple delete-and-reinse
 - **WAL Writer Bottleneck:** WAL only allows one concurrent writer. Heavy or slow transactions can lock out other write operations, causing failures if the 5000ms timeout is exceeded.
 - **Write Churn:** The delete-and-reinsert synchronization pattern for `project_languages` increases the size of the WAL file and write IOPS due to unnecessary row deletion and recreation.
 - **JSON Parsing Overhead:** Bypassing relational schema for `metadata_json` incurs a continuous CPU cost on every database read to deserialize records back into `Project` structs.
-- **Timestamps:** Upserts overwrite `discovered_at`, sacrificing first-seen tracking for simpler queries.
+- **Timestamps:** `discovered_at` is set once on insert and preserved on subsequent upserts, providing stable first-seen tracking for each project path.
