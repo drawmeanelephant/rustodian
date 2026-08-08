@@ -12,6 +12,30 @@ Rustodian uses the `ignore` crate for filesystem traversal rather than `walkdir`
 
 Language detection utilizes pure functions (like `detect_rust`) to evaluate directories for specific marker files. Detectors are evaluated independently. When a directory contains competing manifests (e.g., both `Cargo.toml` and `package.json`), Rustodian recognizes a polyglot project. It yields independent, High-confidence detections for both languages, without reducing the confidence level of either.
 
+## Project-Root Markers (Cloudflare Wrangler)
+
+A directory counts as a project when it has language evidence **or** project-root evidence. Project-root markers are tracked separately from language detection: a marker identifies a project or deployment root without making any claim about the implementation language.
+
+Rustodian recognizes these Cloudflare Wrangler configuration files as project-root evidence:
+
+- `wrangler.jsonc`
+- `wrangler.json`
+- `wrangler.toml`
+
+Wrangler is a deployment tool, not a programming language — its presence never produces a `Language` detection. The file's contents are never parsed; the existence of the config file alone is sufficient, so even a malformed `wrangler.jsonc` marks the directory as a project root.
+
+The table below summarizes the semantics:
+
+| Directory contents | Discovered? | Language detection |
+|--------------------|-------------|--------------------|
+| `wrangler.jsonc` only | Yes | None — no language is claimed |
+| `wrangler.jsonc` + `package.json` | Yes | Node, detected normally (High) |
+| `wrangler.toml` + `pyproject.toml` | Yes | Python, detected normally (High) |
+| `package.json` without Wrangler | Yes | Node, unchanged |
+| empty directory | No | — |
+
+For a Wrangler-only project, the `languages` list stays empty (the implementation language is unknown and Rustodian does not invent one). The platform is captured in `ProjectMetadata.extra["platform"]` as `"cloudflare-wrangler"`, using the extensible metadata bag — no schema changes required.
+
 ### Markers and Confidence Rules
 
 | Language | Marker File(s) | Confidence Rules |

@@ -11,6 +11,8 @@ pub mod vcs;
 // Re-export key types for convenience
 pub use language::{DetectionConfidence, Language, LanguageDetection, LanguageMarker};
 pub use project::RemoteProject;
-pub use project::{Project, ProjectCommand, ProjectId, ProjectLog, ProjectMetadata};
+pub use project::{
+    Project, ProjectCommand, ProjectId, ProjectLog, ProjectMetadata, ProjectRootMarker,
+};
 pub use scan::{ScanConfig, ScanId, ScanRecord, ScanStatus};
 pub use vcs::{CommitInfo, PullRequest, VcsInfo, VcsType};

@@ -90,7 +90,11 @@ impl ProjectScanner for FsScanner {
                 }
 
                 let languages = crate::detection::detect_languages(path);
-                if !languages.is_empty() {
+                let root_markers = crate::detection::detect_project_roots(path);
+
+                // A directory is a project if it has language evidence or
+                // project-root evidence (e.g. a Wrangler config file).
+                if !languages.is_empty() || !root_markers.is_empty() {
                     let name = path
                         .file_name()
                         .unwrap_or_else(|| std::ffi::OsStr::new("unknown"))
@@ -105,6 +109,7 @@ impl ProjectScanner for FsScanner {
                             path: path.to_path_buf(),
                             languages,
                             commands,
+                            project_roots: root_markers,
                         });
                     }
 
@@ -301,5 +306,162 @@ mod tests {
         // It should only find "parent_proj" and skip descending into "nested_node_proj"
         assert_eq!(projs.len(), 1);
         assert_eq!(projs[0].name, "parent_proj");
+    }
+
+    #[test]
+    fn test_scanner_wrangler_only_project_discovered() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let proj = root.join("wrangler_worker");
+        fs::create_dir_all(&proj).unwrap();
+        // Malformed JSONC must not prevent root detection: presence suffices.
+        fs::write(proj.join("wrangler.jsonc"), "{ not valid jsonc").unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 1);
+        assert_eq!(projs[0].name, "wrangler_worker");
+        assert!(
+            projs[0].languages.is_empty(),
+            "Wrangler-only projects must not claim a language"
+        );
+        assert_eq!(projs[0].project_roots.len(), 1);
+        assert!(matches!(
+            &projs[0].project_roots[0],
+            rustodian_types::ProjectRootMarker::CloudflareWrangler(f) if f == "wrangler.jsonc"
+        ));
+    }
+
+    #[test]
+    fn test_scanner_wrangler_config_variants_discovered() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        for (name, file) in [
+            ("a", "wrangler.jsonc"),
+            ("b", "wrangler.json"),
+            ("c", "wrangler.toml"),
+        ] {
+            let proj = root.join(name);
+            fs::create_dir_all(&proj).unwrap();
+            File::create(proj.join(file)).unwrap();
+        }
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 3);
+        assert!(projs.iter().all(|p| p.languages.is_empty()));
+        assert_eq!(projs[0].project_roots.len(), 1);
+    }
+
+    #[test]
+    fn test_scanner_wrangler_with_node_keeps_node_detection() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let proj = root.join("node_worker");
+        fs::create_dir_all(&proj).unwrap();
+        File::create(proj.join("wrangler.jsonc")).unwrap();
+        fs::write(proj.join("package.json"), "{}").unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 1);
+        assert_eq!(projs[0].name, "node_worker");
+        assert_eq!(projs[0].languages.len(), 1);
+        assert_eq!(
+            projs[0].languages[0].language,
+            rustodian_types::Language::Node
+        );
+        assert_eq!(
+            projs[0].languages[0].confidence,
+            rustodian_types::DetectionConfidence::High
+        );
+        assert_eq!(projs[0].project_roots.len(), 1);
+    }
+
+    #[test]
+    fn test_scanner_wrangler_with_python_keeps_python_detection() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let proj = root.join("python_worker");
+        fs::create_dir_all(&proj).unwrap();
+        File::create(proj.join("wrangler.toml")).unwrap();
+        File::create(proj.join("pyproject.toml")).unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        assert_eq!(projs.len(), 1);
+        assert_eq!(projs[0].name, "python_worker");
+        assert_eq!(projs[0].languages.len(), 1);
+        assert_eq!(
+            projs[0].languages[0].language,
+            rustodian_types::Language::Python
+        );
+        assert_eq!(projs[0].project_roots.len(), 1);
+    }
+
+    #[test]
+    fn test_scanner_language_only_project_has_no_project_roots() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let proj = root.join("plain_node");
+        fs::create_dir_all(&proj).unwrap();
+        fs::write(proj.join("package.json"), "{}").unwrap();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+
+        // Ordinary Node discovery is unchanged: no project-root evidence.
+        assert_eq!(projs.len(), 1);
+        assert_eq!(projs[0].languages.len(), 1);
+        assert!(projs[0].project_roots.is_empty());
+    }
+
+    #[test]
+    fn test_scanner_empty_directory_finds_nothing() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let scanner = FsScanner;
+        let config = ScanConfig {
+            max_depth: 3,
+            follow_symlinks: false,
+            exclude_patterns: vec![],
+        };
+        let projs = scanner.scan(root, &config).unwrap();
+        assert!(projs.is_empty());
     }
 }
