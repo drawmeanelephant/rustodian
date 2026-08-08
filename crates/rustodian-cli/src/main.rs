@@ -127,6 +127,13 @@ enum Commands {
 
     /// Print active configuration
     Config,
+
+    /// Remove stale database records for tracked projects whose paths no longer exist
+    Prune {
+        /// Actually delete stale database records (default is a dry run)
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -221,5 +228,6 @@ fn main() -> Result<()> {
             commands::logs::execute(&custodian, &store, &project, limit, &cli.format)
         }
         Commands::Config => commands::config::execute(&db_path, &cli.format),
+        Commands::Prune { purge } => commands::prune::execute(&custodian, purge, &cli.format),
     }
 }

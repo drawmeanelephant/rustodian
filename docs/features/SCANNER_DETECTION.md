@@ -42,8 +42,16 @@ The `DetectionConfidence` enum reflects evidence strength:
 
 Exactly one `ProjectCommand` exists per command name: when the same name is provided by several sources, the **highest-priority source wins** (1 over 2 over 3 over 4). So if all four define `test`, only the `.rustodian.toml` definition survives, while unique names from every source remain available. After resolution, commands are returned sorted **alphabetically by name**, so discovery output is deterministic across runs.
 
-## Self-Healing Garbage Collection
+## Stale Records and Explicit Pruning
 
-Every scan (`Custodian::scan`) performs a self-healing garbage collection pass. If a tracked project's path no longer exists on disk, Rustodian purges it from the database.
+Scans are purely additive: `Custodian::scan` discovers and updates projects but never deletes a tracked project merely because its filesystem path no longer exists. For an observatory, temporarily unavailable disks, mounts, or directories must never erase project history or command logs, so there is no automatic garbage-collection pass.
 
-Crucially, dependent tables handle cascading deletions. The `project_logs` (which stores audit history) and `project_languages` tables define foreign keys referencing `projects(id)` with `ON DELETE CASCADE`. When the scan drops a missing project, SQLite automatically cascade-deletes all its associated languages and audit logs. This prevents orphaned records, keeping the schema clean and self-correcting without manual intervention.
+Stale *database* records — tracked projects whose stored paths no longer exist — are removed explicitly with the `prune` command:
+
+```bash
+rustodian prune            # dry run: list stale records, mutate nothing
+rustodian prune --purge    # delete stale database records
+rustodian prune --format json
+```
+
+`prune` defaults to a dry run that prints the project name, ID, and path without mutating the database. `--purge` deletes only the database rows for projects whose paths are currently missing. Dependent tables handle cascading deletions: the `project_logs` (audit history) and `project_languages` tables define foreign keys referencing `projects(id)` with `ON DELETE CASCADE`, so SQLite automatically removes the associated records. `prune` never touches the filesystem.
