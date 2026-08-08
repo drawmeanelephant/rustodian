@@ -65,7 +65,12 @@ fn memory_manager(db_url: &str) -> SqliteConnectionManager {
 /// bootstrap path uniform.
 fn bootstrap_journal_mode_wal(path: &Path) -> Result<(), StorageError> {
     let conn = rusqlite::Connection::open(path).map_err(StorageError::Sqlite)?;
-    conn.execute_batch("PRAGMA journal_mode = WAL;")
+    // Configure the busy timeout before the journal-mode transition: the
+    // transition takes the database write lock, and two Rustodian processes
+    // starting concurrently on the same fresh database would otherwise fail
+    // it immediately with `SQLITE_BUSY` instead of waiting for the other
+    // process's lock to be released.
+    conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;")
         .map_err(StorageError::Sqlite)?;
     Ok(())
 }
@@ -779,9 +784,12 @@ mod tests {
             let db_path = dir.path().join(format!("fresh-{i}.db"));
             let failures = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 
-            // Build the pool exactly as `SqliteStore::open` does (same manager
-            // and init pragmas); only the error handler differs so transient
+            // Mirror `SqliteStore::open` startup ordering exactly: the
+            // one-time WAL bootstrap runs on a dedicated connection before
+            // the pool exists, then the pool is built with the same manager
+            // and init pragmas. Only the error handler differs so transient
             // pool errors are observable in the test.
+            bootstrap_journal_mode_wal(&db_path).unwrap();
             let pool = r2d2::Pool::builder()
                 .error_handler(Box::new(CaptureErrors(failures.clone())))
                 .build(file_manager(&db_path))
@@ -945,11 +953,12 @@ mod tests {
     /// A forced storage write failure must propagate through
     /// `Custodian::scan` as an error instead of being swallowed.
     ///
-    /// Every pooled connection is switched to `PRAGMA query_only`, so any
-    /// write from the scan fails with a real `SQLite` error
-    /// (`SQLITE_READONLY`, "attempt to write a readonly database"). Note
-    /// that chmod'ing the files would not work here: the pool's connections
-    /// are already open and keep their write file descriptors.
+    /// A single-connection pool (`max_size(1)`) makes the setup deterministic:
+    /// there is exactly one pooled connection, so switching it to
+    /// `PRAGMA query_only` guarantees the scan's write fails with a real
+    /// `SQLite` error (`SQLITE_READONLY`, "attempt to write a readonly
+    /// database") instead of relying on sequential checkouts visiting every
+    /// connection of a larger pool.
     #[test]
     fn test_scan_write_failure_propagates_through_scan() {
         use rustodian_core::Custodian;
@@ -985,15 +994,24 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let store = SqliteStore::open(&db_path).unwrap();
+
+        // Single-connection pool so `query_only` deterministically applies to
+        // the only connection the scan can use.
+        bootstrap_journal_mode_wal(&db_path).unwrap();
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(file_manager(&db_path))
+            .unwrap();
+        let store = SqliteStore {
+            pool: std::sync::Arc::new(pool),
+        };
         store.migrate().unwrap();
 
-        // Force every pooled connection to reject writes (max pool size is 10,
-        // so 10 sequential checkouts reach each connection).
-        for _ in 0..10 {
-            let conn = store.get_conn().unwrap();
-            conn.execute_batch("PRAGMA query_only = ON;").unwrap();
-        }
+        // Force the sole pooled connection to reject writes, then return it
+        // to the pool.
+        let conn = store.get_conn().unwrap();
+        conn.execute_batch("PRAGMA query_only = ON;").unwrap();
+        drop(conn);
 
         let custodian = Custodian::new(
             Box::new(store),
