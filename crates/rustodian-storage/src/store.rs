@@ -199,12 +199,13 @@ impl ProjectStore for SqliteStore {
             .transaction()
             .map_err(|e| CoreError::Storage(format!("failed to begin transaction: {e}")))?;
 
+        // `discovered_at` is intentionally left out of `DO UPDATE SET` so that the
+        // original "first-seen" timestamp survives repeated saves of the same path.
         tx.execute(
             "INSERT INTO projects (id, name, path, discovered_at, last_scanned_at, metadata_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(path) DO UPDATE SET
                 name=excluded.name,
-                discovered_at=excluded.discovered_at,
                 last_scanned_at=excluded.last_scanned_at,
                 metadata_json=excluded.metadata_json;",
             params![
@@ -559,6 +560,95 @@ mod tests {
         println!("{err}");
         assert!(err.to_string().contains("invalid metadata JSON"));
     }
+    #[test]
+    fn test_upsert_preserves_discovered_at() {
+        use rustodian_core::traits::ProjectStore;
+        use rustodian_types::{Project, ProjectId, ProjectMetadata, VcsInfo, VcsType};
+        use std::path::PathBuf;
+
+        fn ts(s: &str) -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        }
+
+        let store = SqliteStore::open_in_memory().unwrap();
+        store.migrate().unwrap();
+
+        let path = PathBuf::from("/test/preserve-discovery");
+
+        // First save: discovery timestamp A.
+        let proj_a = Project {
+            id: ProjectId::new(),
+            name: "proj_a".to_string(),
+            path: path.clone(),
+            discovered_at: ts("2024-01-01T00:00:00Z"),
+            last_scanned_at: Some(ts("2024-01-01T01:00:00Z")),
+            vcs: None,
+            languages: vec![],
+            metadata: ProjectMetadata::default(),
+        };
+        let id = store.save_project(&proj_a).unwrap();
+
+        // Second save of the same path: later discovery timestamp B, changed
+        // metadata, last_scanned_at, and VCS data (as a fresh scan would produce).
+        let metadata_b = ProjectMetadata {
+            description: Some("updated description".to_string()),
+            tags: vec!["rust".to_string()],
+            ..ProjectMetadata::default()
+        };
+
+        let proj_b = Project {
+            id: ProjectId::new(),
+            name: "proj_b_updated".to_string(),
+            path,
+            discovered_at: ts("2024-06-01T00:00:00Z"),
+            last_scanned_at: Some(ts("2024-06-01T12:00:00Z")),
+            vcs: Some(VcsInfo {
+                vcs_type: VcsType::Git,
+                branch: Some("main".to_string()),
+                remote_url: Some("https://example.com/repo.git".to_string()),
+                is_dirty: true,
+                last_commit: None,
+            }),
+            languages: vec![],
+            metadata: metadata_b,
+        };
+        store.save_project(&proj_b).unwrap();
+
+        // The original discovery timestamp must survive the upsert...
+        let loaded = store.get_project(&id).unwrap().unwrap();
+        assert_eq!(loaded.discovered_at, ts("2024-01-01T00:00:00Z"));
+        assert_eq!(loaded.id, id);
+
+        // ...while the mutable fields reflect the second save.
+        assert_eq!(loaded.name, "proj_b_updated");
+        assert_eq!(loaded.last_scanned_at, Some(ts("2024-06-01T12:00:00Z")));
+        assert_eq!(
+            loaded.metadata.description.as_deref(),
+            Some("updated description")
+        );
+        assert_eq!(loaded.metadata.tags, vec!["rust".to_string()]);
+        let vcs = loaded.vcs.as_ref().unwrap();
+        assert_eq!(vcs.vcs_type, VcsType::Git);
+        assert_eq!(vcs.branch.as_deref(), Some("main"));
+
+        // A brand-new path still uses its supplied discovery timestamp.
+        let proj_c = Project {
+            id: ProjectId::new(),
+            name: "proj_c".to_string(),
+            path: PathBuf::from("/test/brand-new"),
+            discovered_at: ts("2024-03-15T08:30:00Z"),
+            last_scanned_at: None,
+            vcs: None,
+            languages: vec![],
+            metadata: ProjectMetadata::default(),
+        };
+        let id_c = store.save_project(&proj_c).unwrap();
+        let loaded_c = store.get_project(&id_c).unwrap().unwrap();
+        assert_eq!(loaded_c.discovered_at, ts("2024-03-15T08:30:00Z"));
+    }
+
     use super::*;
 
     #[test]
