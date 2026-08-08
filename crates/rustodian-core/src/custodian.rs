@@ -157,6 +157,18 @@ impl Custodian {
                 let mut metadata = rustodian_types::ProjectMetadata::default();
                 metadata.commands.clone_from(&d.commands);
 
+                // Record the platform a project-root marker belongs to (e.g.
+                // Cloudflare Wrangler) in the extensible metadata bag. This is
+                // independent of language identity: a Wrangler-only project has
+                // no language detection, only this platform marker.
+                if let Some(platform) = d
+                    .project_roots
+                    .first()
+                    .map(rustodian_types::ProjectRootMarker::platform)
+                {
+                    metadata.set_platform(platform);
+                }
+
                 Project {
                     id: ProjectId::new(),
                     name: d.name.clone(),
@@ -887,6 +899,7 @@ mod tests {
             path: PathBuf::from(format!("/projects/{name}")),
             languages: vec![],
             commands: vec![],
+            project_roots: vec![],
         }
     }
 
@@ -970,6 +983,79 @@ mod tests {
             &err,
             CoreError::Storage(msg) if msg.contains("injected storage failure")
         ));
+    }
+
+    // ── project-root markers → platform metadata ────────────────────────
+
+    #[test]
+    fn test_scan_stores_platform_marker_for_wrangler_root() {
+        let mut discovered = discovered_project("worker");
+        discovered.project_roots = vec![rustodian_types::ProjectRootMarker::CloudflareWrangler(
+            "wrangler.jsonc".to_string(),
+        )];
+
+        let saved = Arc::new(Mutex::new(Vec::new()));
+        let store = RecordingScanStore {
+            saved: saved.clone(),
+            fail_save: false,
+        };
+        let scanner = FixedScanner {
+            discovered: vec![discovered],
+        };
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(scanner),
+            Box::new(SelectiveGit {
+                failing_path: PathBuf::from("/nonexistent"),
+            }),
+            Box::new(DefaultCommandRunner),
+        );
+
+        let report = custodian
+            .scan(Path::new("/projects"), &ScanConfig::default())
+            .expect("scan should succeed");
+        assert_eq!(report.projects_new, 1);
+
+        let saved = saved.lock().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].metadata.extra["platform"], "cloudflare-wrangler");
+        assert!(
+            saved[0].languages.is_empty(),
+            "Wrangler-only projects must not claim a language"
+        );
+    }
+
+    #[test]
+    fn test_scan_without_project_roots_has_no_platform_marker() {
+        let discovered = discovered_project("plain");
+
+        let saved = Arc::new(Mutex::new(Vec::new()));
+        let store = RecordingScanStore {
+            saved: saved.clone(),
+            fail_save: false,
+        };
+        let scanner = FixedScanner {
+            discovered: vec![discovered],
+        };
+        let custodian = Custodian::new(
+            Box::new(store),
+            Box::new(scanner),
+            Box::new(SelectiveGit {
+                failing_path: PathBuf::from("/nonexistent"),
+            }),
+            Box::new(DefaultCommandRunner),
+        );
+
+        custodian
+            .scan(Path::new("/projects"), &ScanConfig::default())
+            .expect("scan should succeed");
+
+        let saved = saved.lock().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!(
+            saved[0].metadata.extra.get("platform").is_none(),
+            "no platform marker expected without project-root evidence"
+        );
     }
 
     // ── explicit prune replaces implicit scan deletion ──────────────────

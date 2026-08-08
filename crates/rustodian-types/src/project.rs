@@ -57,6 +57,41 @@ pub struct ProjectCommand {
     pub use_shell: bool,
 }
 
+/// Evidence that a directory is a software project root, independent of any
+/// programming language.
+///
+/// Unlike [`LanguageMarker`](crate::LanguageMarker), which identifies the
+/// implementation language, a project-root marker establishes that a directory
+/// is a project or deployment root without making any language claim. For
+/// example, a Cloudflare Wrangler config file identifies a Workers deployment
+/// target, but the code inside could be written in any language.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRootMarker {
+    /// A Cloudflare Wrangler configuration file
+    /// (`wrangler.jsonc`, `wrangler.json`, or `wrangler.toml`).
+    CloudflareWrangler(String),
+}
+
+impl ProjectRootMarker {
+    /// The platform/ecosystem this marker belongs to, for use in extensible
+    /// project metadata (e.g. `ProjectMetadata.extra["platform"]`).
+    #[must_use]
+    pub fn platform(&self) -> &'static str {
+        match self {
+            Self::CloudflareWrangler(_) => "cloudflare-wrangler",
+        }
+    }
+}
+
+impl ProjectMetadata {
+    /// Record a platform (e.g. `"cloudflare-wrangler"`) established by
+    /// project-root evidence in the extensible metadata bag.
+    pub fn set_platform(&mut self, platform: &str) {
+        self.extra = serde_json::json!({ "platform": platform });
+    }
+}
+
 /// Extensible metadata bag.
 ///
 /// Uses `serde(flatten)` with a JSON value to allow future fields

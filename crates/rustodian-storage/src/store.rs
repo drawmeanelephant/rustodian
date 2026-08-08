@@ -1048,6 +1048,7 @@ mod tests {
                     path: PathBuf::from("/projects/p"),
                     languages: vec![],
                     commands: vec![],
+                    project_roots: vec![],
                 }])
             }
         }

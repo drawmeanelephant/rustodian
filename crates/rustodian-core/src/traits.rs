@@ -11,6 +11,9 @@ pub struct DiscoveredProject {
     pub path: std::path::PathBuf,
     pub languages: Vec<rustodian_types::LanguageDetection>,
     pub commands: Vec<rustodian_types::ProjectCommand>,
+    /// Project-root evidence independent of language identity
+    /// (e.g. Cloudflare Wrangler config files).
+    pub project_roots: Vec<rustodian_types::ProjectRootMarker>,
 }
 
 /// Contract for project persistence.
