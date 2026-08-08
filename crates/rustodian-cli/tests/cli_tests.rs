@@ -190,6 +190,45 @@ fn test_janitor() {
     assert!(node_modules_dir.exists());
 }
 
+/// A forced `SQLite` write failure during `rustodian scan` must surface
+/// clearly and make the CLI exit nonzero — never a warning followed by an
+/// apparent success.
+#[cfg(unix)]
+#[test]
+fn test_scan_storage_failure_exits_nonzero() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let proj_dir = dir.path().join("my-rust-proj");
+    fs::create_dir(&proj_dir).unwrap();
+    fs::write(proj_dir.join("Cargo.toml"), "[package]").unwrap();
+
+    // 1. Scan once to create and migrate the database.
+    scan_project(dir.path(), "test.db");
+
+    // 2. Make the database and its WAL sidecars read-only. The next invocation
+    //    is a fresh process, so its connections open the files read-only and
+    //    every write fails with a real SQLite error.
+    for name in ["test.db", "test.db-wal", "test.db-shm"] {
+        let p = dir.path().join(name);
+        if p.exists() {
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o444)).unwrap();
+        }
+    }
+
+    // 3. The second scan must surface the storage failure and exit nonzero,
+    //    without printing the usual success banner.
+    let mut cmd = Command::cargo_bin("rustodian").unwrap();
+    cmd.env("RUSTODIAN_DB", dir.path().join("test.db"))
+        .arg("scan")
+        .arg("--path")
+        .arg(dir.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("readonly"))
+        .stdout(predicate::str::contains("Scan Complete").not());
+}
+
 #[cfg(unix)]
 #[test]
 fn test_janitor_refuses_symlink_target() {
