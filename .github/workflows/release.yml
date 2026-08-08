@@ -5,13 +5,12 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -27,27 +26,36 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --target ${{ matrix.target }} -p rustodian-cli
+      - name: Smoke test binary
+        run: target/${{ matrix.target }}/release/rustodian --version
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: rustodian-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/rustodian-cli
-            target/${{ matrix.target }}/release/rustodian-cli.exe
+          path: target/${{ matrix.target }}/release/rustodian
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Download artifacts
         uses: actions/download-artifact@v8
+      - name: Stage release assets
+        run: |
+          mkdir -p dist
+          mv rustodian-x86_64-unknown-linux-gnu/rustodian dist/rustodian-x86_64-unknown-linux-gnu
+          mv rustodian-aarch64-apple-darwin/rustodian dist/rustodian-aarch64-apple-darwin
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            rustodian-*/rustodian-cli*
+            dist/rustodian-x86_64-unknown-linux-gnu
+            dist/rustodian-aarch64-apple-darwin
